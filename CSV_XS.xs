@@ -1,4 +1,4 @@
-/*  Copyright (c) 2007-2009 H.Merijn Brand.  All rights reserved.
+/*  Copyright (c) 2007-2010 H.Merijn Brand.  All rights reserved.
  *  Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
  *  This program is free software; you can redistribute it and/or
  *  modify it under the same terms as Perl itself.
@@ -20,6 +20,9 @@
 #if (PERL_BCDVERSION <= 0x5005005)
 #  define SvUTF8_on(sv)	/* no-op */
 #  define SvUTF8(sv)	0
+#  endif
+#ifndef PERLIO_F_UTF8
+#  define PERLIO_F_UTF8	0x00008000
 #  endif
 
 #define MAINT_DEBUG	0
@@ -358,7 +361,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     else if ((svp = hv_fetchs (hv, "eol", FALSE)) && *svp && SvOK (*svp)) {
 	STRLEN len;
 	byte *eol = (byte *)SvPV (*svp, len);
-	_cache_show_str  ("eol", len,		eol);
+	_cache_show_str  ("eol", (int)len,	eol);
 	}
     else
 	_cache_show_str  ("eol", 8,		(byte *)"<broken>");
@@ -567,6 +570,8 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	PUSHs ((dst));
 	PUSHs (tmp);
 	PUTBACK;
+	if (csv->utf8)
+	    SvUTF8_on (tmp);
 	result = call_sv (m_print, G_SCALAR | G_METHOD);
 	SPAGAIN;
 	if (result) {

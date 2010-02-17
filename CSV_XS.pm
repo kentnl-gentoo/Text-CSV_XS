@@ -1,6 +1,6 @@
 package Text::CSV_XS;
 
-# Copyright (c) 2007-2009 H.Merijn Brand.  All rights reserved.
+# Copyright (c) 2007-2010 H.Merijn Brand.  All rights reserved.
 # Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
 # Portions Copyright (c) 1997 Alan Citterman. All rights reserved.
 #
@@ -30,7 +30,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA );
-$VERSION = "0.70";
+$VERSION = "0.71";
 @ISA     = qw( DynaLoader );
 bootstrap Text::CSV_XS $VERSION;
 
@@ -114,12 +114,14 @@ sub new
 	    }
 #	croak?
 	$last_new_err = SetDiag (undef, 1000, "INI - Unknown attribute '$_'");
+	$attr->{auto_diag} and error_diag ();
 	return;
 	}
 
     my $self  = {%def_attr, %{$attr}};
     if (my $ec = _check_sanity ($self)) {
 	$last_new_err = SetDiag (undef, $ec);
+	$attr->{auto_diag} and error_diag ();
 	return;
 	}
 
@@ -351,24 +353,29 @@ sub error_diag
 
     my $context = wantarray;
     unless (defined $context) {	# Void context, auto-diag
-	if ($diag[0] && $diag[0] != 2012 && $self && ref $self) {
+	if ($diag[0] && $diag[0] != 2012) {
 	    my $msg = "# CSV_XS ERROR: $diag[0] - $diag[1]\n";
+	    if ($self && ref $self) {	# auto_diag
 
-	    my $lvl = $self->{auto_diag};
-	    if ($lvl < 2) {
-		my @c = caller (2);
-		if (@c >= 11 && $c[10] && ref $c[10] eq "HASH") {
-		    my $hints = $c[10];
-		    (exists $hints->{autodie} && $hints->{autodie} or
-		     exists $hints->{"guard Fatal"} &&
-		    !exists $hints->{"no Fatal"}) and
-			$lvl++;
-		    # Future releases of autodie will probably set $^H{autodie}
-		    #  to "autodie @args", like "autodie :all" or "autodie open"
-		    #  so we can/should check for "open" or "new"
+		my $lvl = $self->{auto_diag};
+		if ($lvl < 2) {
+		    my @c = caller (2);
+		    if (@c >= 11 && $c[10] && ref $c[10] eq "HASH") {
+			my $hints = $c[10];
+			(exists $hints->{autodie} && $hints->{autodie} or
+			 exists $hints->{"guard Fatal"} &&
+			!exists $hints->{"no Fatal"}) and
+			    $lvl++;
+			# Future releases of autodie will probably set $^H{autodie}
+			#  to "autodie @args", like "autodie :all" or "autodie open"
+			#  so we can/should check for "open" or "new"
+			}
 		    }
+		$lvl > 1 ? die $msg : warn $msg;
 		}
-	    $lvl > 1 ? die $msg : warn $msg;
+	    else {	# called without args in void context
+		warn $msg;
+		}
 	    }
 	return;
 	}
@@ -1699,7 +1706,7 @@ flags. See ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2007-2009 H.Merijn Brand for PROCURA B.V.
+Copyright (C) 2007-2010 H.Merijn Brand for PROCURA B.V.
 Copyright (C) 1998-2001 Jochen Wiedmann. All rights reserved.
 Portions Copyright (C) 1997 Alan Citterman. All rights reserved.
 
