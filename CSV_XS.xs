@@ -18,8 +18,9 @@
 #define NEED_vload_module
 #include "ppport.h"
 #if (PERL_BCDVERSION <= 0x5005005)
-#  define SvUTF8_on(sv)	/* no-op */
-#  define SvUTF8(sv)	0
+#  define sv_utf8_upgrade(sv)	/* no-op */
+#  define SvUTF8_on(sv)		/* no-op */
+#  define SvUTF8(sv)		0
 #  endif
 #ifndef PERLIO_F_UTF8
 #  define PERLIO_F_UTF8	0x00008000
@@ -68,6 +69,7 @@
 #define CH_CR		'\015'
 #define CH_SPACE	'\040'
 #define CH_DEL		'\177'
+#define CH_EOLX		1215
 
 #define useIO_EOF	0x10
 
@@ -126,6 +128,8 @@ typedef struct {
     SV *	tmp;
     int		utf8;
     byte	has_ahead;
+    byte	eolx;
+    int		eol_pos;
     STRLEN	size;
     STRLEN	used;
     char	buffer[BUFFER_SIZE];
@@ -182,7 +186,7 @@ xs_error_t xs_errors[] =  {
     { 3003, "EHR - bind_columns () and column_names () fields count mismatch"	},
     { 3004, "EHR - bind_columns () only accepts refs to scalars"		},
     { 3006, "EHR - bind_columns () did not pass enough refs for parsed fields"	},
-    { 3007, "EHR - bind_columns needs refs to writeable scalars"		},
+    { 3007, "EHR - bind_columns needs refs to writable scalars"			},
     { 3008, "EHR - unexpected error in bound fields"				},
 
     {    0, "" },
@@ -561,6 +565,18 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	else
 	    csv->is_bound = 0;
 	}
+
+    csv->eolx = 0;
+    if (csv->eol_len) {
+	if (csv->verbatim)
+	    csv->eolx = 1;
+	else
+	for (len = 0; len < csv->eol_len; len++) {
+	    if (csv->eol[len] == CH_NL || csv->eol[len] == CH_CR) continue;
+	    csv->eolx = 1;
+	    break;
+	    }
+	}
     } /* SetupCsv */
 
 #define Print(csv,dst)		cx_Print (aTHX_ csv, dst)
@@ -664,8 +680,10 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		int	e = 0;
 
 		if (!csv->binary && is_csv_binary (c)) {
-		    if (SvUTF8 (*svp))
+		    if (SvUTF8 (*svp)) {
 			csv->binary = 1;
+			csv->utf8   = 1;
+			}
 		    else {
 			SvREFCNT_inc (*svp);
 			unless (hv_store (csv->self, "_ERROR_INPUT", 12, *svp, 0))
@@ -721,12 +739,26 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
     unless (csv->useIO)
 	return EOF;
 
-    {   int	result;
+    if (csv->tmp && csv->eol_pos >= 0) {
+	csv->eol_pos = -2;
+	sv_setpvn (csv->tmp, csv->eol, csv->eol_len);
+	csv->bptr = SvPV (csv->tmp, csv->size);
+	csv->used = 0;
+	return CH_EOLX;
+	}
+
+    {	int		result, rslen;
+	const char	*rs;
 
 	dSP;
 
 	require_IO_Handle;
 
+	csv->eol_pos = -1;
+	if (csv->eolx) {
+	    rs = SvPOK (PL_rs) || SvPOKp (PL_rs) ? SvPV_const (PL_rs, rslen) : NULL;
+	    sv_setpvn (PL_rs, csv->eol, csv->eol_len);
+	    }
 	PUSHMARK (sp);
 	EXTEND (sp, 1);
 	PUSHs (src);
@@ -734,12 +766,23 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	result = call_sv (m_getline, G_SCALAR | G_METHOD);
 	SPAGAIN;
 	csv->tmp = result ? POPs : NULL;
+	if (csv->eolx) {
+	    if (rs)
+		sv_setpvn (PL_rs, rs, rslen);
+	    else
+		SvPOK_off (PL_rs);
+	    }
 	PUTBACK;
+#if MAINT_DEBUG > 4
+	sv_dump (csv->tmp);
+#endif
 	}
     if (csv->tmp && SvOK (csv->tmp)) {
-	csv->bptr = SvPV (csv->tmp, csv->size);
+	STRLEN tmp_len;
+	csv->bptr = SvPV (csv->tmp, tmp_len);
 	csv->used = 0;
-	if (csv->verbatim && csv->eol_len && csv->size >= csv->eol_len) {
+	csv->size = tmp_len;
+	if (csv->eolx && csv->size >= csv->eol_len) {
 	    int i, match = 1;
 	    for (i = 1; i <= (int)csv->eol_len; i++) {
 		unless (csv->bptr[csv->size - i] == csv->eol[csv->eol_len - i]) {
@@ -748,13 +791,20 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 		    }
 		}
 	    if (match) {
+#if MAINT_DEBUG > 4
+		fprintf (stderr, "# EOLX match, size: %d\n", csv->size);
+#endif
 		csv->size -= csv->eol_len;
+		unless (csv->verbatim)
+		    csv->eol_pos = csv->size;
 		csv->bptr[csv->size] = (char)0;
 		SvCUR_set (csv->tmp, csv->size);
+		unless (csv->verbatim || csv->size)
+		    return CH_EOLX;
 		}
 	    }
 	if (SvUTF8 (csv->tmp)) csv->utf8 = 1;
-	if (csv->size) 
+	if (tmp_len)
 	    return ((byte)csv->bptr[csv->used++]);
 	}
     csv->useIO |= useIO_EOF;
@@ -772,19 +822,57 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
     return FALSE;				\
     }
 
-#define CSV_PUT_SV(c) {				\
+#if MAINT_DEBUG > 4
+#define PUT_RPT       fprintf (stderr, "# CSV_PUT  @ %4d: 0x%02x '%c'\n", __LINE__, c, isprint (c) ? c : '?')
+#define PUT_EOLX_RPT1 fprintf (stderr, "# PUT EOLX @ %4d\n", __LINE__)
+#define PUT_EOLX_RPT2 fprintf (stderr, "# Done putting EOLX\n")
+#define PUSH_RPT      fprintf (stderr, "# AV_PUSHd @ %4d\n", __LINE__); sv_dump (sv)
+#else
+#define PUT_RPT
+#define PUT_EOLX_RPT1
+#define PUT_EOLX_RPT2
+#define PUSH_RPT
+#endif
+#define CSV_PUT_SV1(c) {			\
     len = SvCUR ((sv));				\
     SvGROW ((sv), len + 2);			\
     *SvEND ((sv)) = c;				\
+    PUT_RPT;					\
     SvCUR_set ((sv), len + 1);			\
     }
+#define CSV_PUT_SV(c) {				\
+    if (c == CH_EOLX) {				\
+	int x; PUT_EOLX_RPT1;			\
+	if (csv->eol_pos == -2)			\
+	    csv->size = 0;			\
+	for (x = 0; x < csv->eol_len; x++)	\
+	    CSV_PUT_SV1 (csv->eol[x]);		\
+	csv->eol_pos = -1;			\
+	PUT_EOLX_RPT2;				\
+	}					\
+    else					\
+	CSV_PUT_SV1 (c);			\
+    }
 
-#define CSV_GET					\
+#define CSV_GET1				\
     ((csv->used < csv->size)			\
 	? ((byte)csv->bptr[csv->used++])	\
 	: CsvGet (csv, src))
+#if MAINT_DEBUG > 3
+int CSV_GET_ (csv_t *csv, SV *src, int l)
+{
+    int c;
+    fprintf (stderr, "# 1-CSV_GET @ %4d: (used: %d, size: %d, eol_pos: %d)\n", l, csv->used, csv->size, csv->eol_pos);
+    c = CSV_GET1;
+    fprintf (stderr, "# 2-CSV_GET @ %4d: 0x%02x '%c'\n", l, c, isprint (c) ? c : '?');
+    return (c);
+    } /* CSV_GET_ */
+#define CSV_GET CSV_GET_ (csv, src, __LINE__)
+#else
+#define CSV_GET CSV_GET1
+#endif
 
-#define AV_PUSH {						\
+#define AV_PUSH { \
     *SvEND (sv) = (char)0;					\
     if (SvCUR (sv) == 0 && (csv->empty_is_undef || (!(f & CSV_FLAGS_QUO) && csv->blank_is_undef))) {\
 	sv_setpvn (sv, NULL, 0);				\
@@ -797,6 +885,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	    SvUTF8_on (sv);					\
 	unless (csv->is_bound) av_push (fields, sv);		\
 	}							\
+    PUSH_RPT;							\
     sv = NULL;							\
     if (csv->keep_meta_info)					\
 	av_push (fflags, newSViv (f));				\
@@ -905,12 +994,11 @@ restart:
 	    else
 	    if (f & CSV_FLAGS_QUO)
 		CSV_PUT_SV (c)
-	    else {
+	    else
 		AV_PUSH;
-		}
 	    } /* SEP char */
 	else
-	if (c == CH_NL) {
+	if (c == CH_NL || c == CH_EOLX) {
 #if MAINT_DEBUG > 1
 	    fprintf (stderr, "# %d/%d/%02x pos %d = NL\n",
 		waitingForField ? 1 : 0, sv ? 1 : 0, f, spl);
@@ -971,7 +1059,7 @@ restart:
 		    }
 
 		if (c2 == CH_NL) {
-		    c = CH_NL;
+		    c = c2;
 		    goto restart;
 		    }
 
@@ -1004,7 +1092,7 @@ restart:
 
 		c2 = CSV_GET;
 
-		if (c2 == CH_NL) {
+		if (c2 == CH_NL || c2 == CH_EOLX) {
 		    AV_PUSH;
 		    return TRUE;
 		    }
@@ -1062,7 +1150,7 @@ restart:
 			    }
 
 			c3 = CSV_GET;
-			if (c3 == CH_NL) {
+			if (c3 == CH_NL || c3 == CH_EOLX) {
 			    AV_PUSH;
 			    return TRUE;
 			    }
@@ -1108,7 +1196,7 @@ restart:
 		if (c2 == csv->quote_char  ||  c2 == csv->sep_char)
 		    CSV_PUT_SV (c2)
 		else
-		if (c2 == CH_NL) {
+		if (c2 == CH_NL || c2 == CH_EOLX) {
 		    AV_PUSH;
 		    return TRUE;
 		    }
@@ -1124,7 +1212,7 @@ restart:
 
 			c3 = CSV_GET;
 
-			if (c3 == CH_NL) {
+			if (c3 == CH_NL || c3 == CH_EOLX) {
 			    AV_PUSH;
 			    return TRUE;
 			    }
@@ -1168,7 +1256,7 @@ restart:
 		waitingForField = 0;
 	    else
 	    if (f & CSV_FLAGS_QUO) {
-		int	c2 = CSV_GET;
+		int c2 = CSV_GET;
 
 		if (c2 == EOF) {
 		    csv->used--;
@@ -1188,7 +1276,7 @@ restart:
 		}
 	    else
 	    if (sv) {
-		int	c2 = CSV_GET;
+		int c2 = CSV_GET;
 
 		if (c2 == EOF) {
 		    csv->used--;
@@ -1363,6 +1451,8 @@ static int cx_xsCombine (pTHX_ SV *self, HV *hv, AV *av, SV *io, bool useIO)
 #if (PERL_BCDVERSION >= 0x5008000)
     PL_ors_sv = ors;
 #endif
+    if (result && !useIO && csv.utf8)
+	sv_utf8_upgrade (io);
     return result;
     } /* xsCombine */
 
