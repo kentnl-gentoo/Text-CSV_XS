@@ -316,17 +316,17 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 #define _pretty_str(csv,xse)	cx_pretty_str (aTHX_ csv, xse)
 static char *cx_pretty_str (pTHX_ byte *s, STRLEN l)
 {
-    SV *dsv = newSVpvs ("");
+    SV *dsv = sv_2mortal (newSVpvs (""));
     return (pv_pretty (dsv, (char *)s, l, 0, NULL, NULL,
 	    (PERL_PV_PRETTY_DUMP | PERL_PV_ESCAPE_UNI_DETECT)));
     } /* _pretty_str */
 
 #define _cache_show_byte(trim,idx) \
-    c = cp[idx]; (void)fprintf (stderr, "  %-20s %02x:%3d\n", trim, c, c)
+    c = cp[idx]; warn ("  %-20s %02x:%3d\n", trim, c, c)
 #define _cache_show_char(trim,idx) \
-    c = cp[idx]; (void)fprintf (stderr, "  %-20s %02x:%s\n",  trim, c, _pretty_str (&c, 1))
-#define _cache_show_str(trim,l,s) \
-    (void)fprintf (stderr, "  %-20s %02d:%s\n",  trim, l, _pretty_str (s, l))
+    c = cp[idx]; warn ("  %-20s %02x:%s\n",  trim, c, _pretty_str (&c, 1))
+#define _cache_show_str(trim,l,str) \
+    warn ("  %-20s %02d:%s\n",  trim, l, _pretty_str (str, l))
 #define _cache_show_cstr(trim,l,idx) _cache_show_str (trim, l, cp + idx)
 
 #define xs_cache_diag(hv)	cx_xs_cache_diag (aTHX_ hv)
@@ -336,12 +336,12 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     byte *cp, c;
 
     unless ((svp = hv_fetchs (hv, "_CACHE", FALSE)) && *svp) {
-	(void)fprintf (stderr, "CACHE: invalid\n");
-	return;
+	warn ("CACHE: invalid\n");	/* uncovered */
+	return;						/* uncovered */
 	}
 
     cp = (byte *)SvPV_nolen (*svp);
-    (void)fprintf (stderr, "CACHE:\n");
+    warn ("CACHE:\n");
     _cache_show_char ("quote",			CACHE_ID_quote_char);
     _cache_show_char ("escape",			CACHE_ID_escape_char);
     _cache_show_char ("sep",			CACHE_ID_sep_char);
@@ -566,17 +566,13 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    csv->is_bound = 0;
 	}
 
-    csv->eolx = 0;
-    if (csv->eol_len) {
-	if (csv->verbatim)
-	    csv->eolx = 1;
-	else
-	for (len = 0; len < csv->eol_len; len++) {
-	    if (csv->eol[len] == CH_NL || csv->eol[len] == CH_CR) continue;
-	    csv->eolx = 1;
-	    break;
-	    }
-	}
+    csv->eolx = csv->eol_len 
+	? csv->verbatim || csv->eol_len >= 2
+	    ? 1
+	    : csv->eol[0] == CH_CR || csv->eol[0] == CH_NL
+		? 0
+		: 1
+	: 0;
     } /* SetupCsv */
 
 #define Print(csv,dst)		cx_Print (aTHX_ csv, dst)
@@ -687,7 +683,7 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		    else {
 			SvREFCNT_inc (*svp);
 			unless (hv_store (csv->self, "_ERROR_INPUT", 12, *svp, 0))
-			    SvREFCNT_dec (*svp);
+/* uncovered */		    SvREFCNT_dec (*svp);
 			(void)SetDiag (csv, 2110);
 			return FALSE;
 			}
@@ -755,7 +751,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	require_IO_Handle;
 
 	csv->eol_pos = -1;
-	if (csv->eolx) {
+	if (csv->eolx || csv->eol_is_cr) {
 	    rs = SvPOK (PL_rs) || SvPOKp (PL_rs) ? SvPV_const (PL_rs, rslen) : NULL;
 	    sv_setpvn (PL_rs, csv->eol, csv->eol_len);
 	    }
@@ -766,7 +762,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	result = call_sv (m_getline, G_SCALAR | G_METHOD);
 	SPAGAIN;
 	csv->tmp = result ? POPs : NULL;
-	if (csv->eolx) {
+	if (csv->eolx || csv->eol_is_cr) {
 	    if (rs)
 		sv_setpvn (PL_rs, rs, rslen);
 	    else
@@ -1063,14 +1059,6 @@ restart:
 		    goto restart;
 		    }
 
-		if (csv->useIO && csv->eol_len == 0 && !is_csv_binary (c2)) {
-		    set_eol_is_cr (csv);
-		    c = CH_NL;
-		    csv->used--;
-		    csv->has_ahead++;
-		    goto restart;
-		    }
-
 		csv->used--;
 		ERROR_INSIDE_FIELD (2031);
 		}
@@ -1214,14 +1202,6 @@ restart:
 
 			if (c3 == CH_NL || c3 == CH_EOLX) {
 			    AV_PUSH;
-			    return TRUE;
-			    }
-
-			if (csv->useIO && csv->eol_len == 0 && !is_csv_binary (c3)) {
-			    set_eol_is_cr (csv);
-			    AV_PUSH;
-			    csv->used--;
-			    csv->has_ahead++;
 			    return TRUE;
 			    }
 			}
