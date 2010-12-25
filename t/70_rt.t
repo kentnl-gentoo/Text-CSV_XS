@@ -4,11 +4,12 @@ use strict;
 $^W = 1;
 
 #use Test::More "no_plan";
- use Test::More tests => 397;
+ use Test::More tests => 438;
 
 BEGIN {
     use_ok "Text::CSV_XS", ();
     plan skip_all => "Cannot load Text::CSV_XS" if $@;
+    require "t/util.pl";
     }
 
 my $csv_file = "_70test.csv";
@@ -275,6 +276,24 @@ while (<DATA>) {
     unlink $csv_file;
     }
 
+{   # Ruslan reported a case where only Text::CSV_PP misbehaved (regression test)
+    $rt = "x1001";
+    open  FH, ">$csv_file";
+    print FH @{$input{$rt}};
+    close FH;
+    my ($c1, $c2);
+    ok (my $csv = Text::CSV_XS->new (), "RT-$rt: $desc{$rt}");
+    open  FH, "<$csv_file";
+    for (1 .. 4) {
+	ok (my $row = $csv->getline (*FH), "getline ($_)");
+	is (scalar @$row, 2, "Line $_: 2 columns");
+	my @exp = $_ <= 2 ? ("0", "A") : ("A", "0");
+	is_deeply ($row, \@exp, "@exp");
+	}
+    close FH;
+    unlink $csv_file;
+    }
+
 {   # http://rt.cpan.org/Ticket/Display.html?id=58356
     # 58356 - Incorrect CSV generated if "quote_space => 0"
     $rt = "58356";
@@ -288,7 +307,10 @@ while (<DATA>) {
 
 {   # http://rt.cpan.org/Ticket/Display.html?id=61525
     $rt = "61525";
-    foreach my $eol ("\n", "!") {
+    # First try with eol in constructor
+    foreach my $eol ("\n", "\r", "!") {
+	$/ = "\n";
+	my $s_eol = _readable ($eol);
 	ok (my $csv = Text::CSV_XS->new ({
 	    binary      => 1,
 	    sep_char    => ":",
@@ -296,12 +318,39 @@ while (<DATA>) {
 	    escape_char => '"',
 	    eol         => $eol,
 	    auto_diag   => 1,
-	    }), "RT-$rt: $desc{$rt}");
+	    }), "RT-$rt: $desc{$rt} - eol = $s_eol (1)");
 
 	open  FH, ">$csv_file";
 	print FH join $eol => qw( "a":"b" "c":"d" "e":"x!y" "!!":"z" );
 	close FH;
 
+	open  FH, "<$csv_file";
+	is_deeply ($csv->getline (*FH), [ "a",  "b"   ], "Pair 1");
+	is_deeply ($csv->getline (*FH), [ "c",  "d"   ], "Pair 2");
+	is_deeply ($csv->getline (*FH), [ "e",  "x!y" ], "Pair 3");
+	is_deeply ($csv->getline (*FH), [ "!!", "z"   ], "Pair 4");
+	is ($csv->getline (*FH), undef, "no more pairs");
+	ok ($csv->eof, "EOF");
+	close FH;
+	unlink $csv_file;
+	}
+
+    # And secondly with eol as method only if not one of the defaults
+    foreach my $eol ("\n", "\r", "!") {
+	$/ = "\n";
+	my $s_eol = _readable ($eol);
+	ok (my $csv = Text::CSV_XS->new ({
+	    binary      => 1,
+	    sep_char    => ":",
+	    quote_char  => '"',
+	    escape_char => '"',
+	    auto_diag   => 1,
+	    }), "RT-$rt: $desc{$rt} - eol = $s_eol (2)");
+	$eol eq "!" and $csv->eol ($eol);
+
+	open  FH, ">$csv_file";
+	print FH join $eol => qw( "a":"b" "c":"d" "e":"x!y" "!!":"z" );
+	close FH;
 	open  FH, "<$csv_file";
 	is_deeply ($csv->getline (*FH), [ "a",  "b"   ], "Pair 1");
 	is_deeply ($csv->getline (*FH), [ "c",  "d"   ], "Pair 2");
@@ -358,3 +407,8 @@ B:035_03_	fission, one	horns	@p 03-035.bmp	@p 03-035.bmp			obsolete Heising ex
 --------------090302050909040309030109--
 «58356» - Incorrect CSV generated if "quote_space => 0"
 «61525» - eol not working for values other than "\n"?
+«x1001» - Lines starting with "0" (Ruslan Dautkhanov)
+"0","A"
+"0","A"
+"A","0"
+"A","0"

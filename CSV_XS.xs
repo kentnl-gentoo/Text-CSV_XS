@@ -25,6 +25,9 @@
 #ifndef PERLIO_F_UTF8
 #  define PERLIO_F_UTF8	0x00008000
 #  endif
+#ifndef MAXINT
+#  define MAXINT ((int)(~(unsigned)0 >> 1))
+#  endif
 
 #define MAINT_DEBUG	0
 
@@ -83,7 +86,7 @@
     if (!self || !SvOK (self) || !SvROK (self) ||	\
 	 SvTYPE (SvRV (self)) != SVt_PVHV)		\
         croak ("self is not a hash ref");		\
-    hv = (HV*)SvRV (self)
+    hv = (HV *)SvRV (self)
 
 #define	byte	unsigned char
 typedef struct {
@@ -566,6 +569,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    csv->is_bound = 0;
 	}
 
+    csv->eol_pos = -1;
     csv->eolx = csv->eol_len 
 	? csv->verbatim || csv->eol_len >= 2
 	    ? 1
@@ -770,6 +774,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	    }
 	PUTBACK;
 #if MAINT_DEBUG > 4
+	fprintf (stderr, "getline () returned:\n");
 	sv_dump (csv->tmp);
 #endif
 	}
@@ -858,7 +863,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 int CSV_GET_ (csv_t *csv, SV *src, int l)
 {
     int c;
-    fprintf (stderr, "# 1-CSV_GET @ %4d: (used: %d, size: %d, eol_pos: %d)\n", l, csv->used, csv->size, csv->eol_pos);
+    fprintf (stderr, "# 1-CSV_GET @ %4d: (used: %d, size: %d, eol_pos: %d, eolx = %d)\n", l, csv->used, csv->size, csv->eol_pos, csv->eolx);
     c = CSV_GET1;
     fprintf (stderr, "# 2-CSV_GET @ %4d: 0x%02x '%c'\n", l, c, isprint (c) ? c : '?');
     return (c);
@@ -883,7 +888,7 @@ int CSV_GET_ (csv_t *csv, SV *src, int l)
 	}							\
     PUSH_RPT;							\
     sv = NULL;							\
-    if (csv->keep_meta_info)					\
+    if (csv->keep_meta_info && fflags)				\
 	av_push (fflags, newSViv (f));				\
     waitingForField = 1;					\
     }
@@ -984,7 +989,7 @@ restart:
 		unless (csv->is_bound)
 		    av_push (fields, sv);
 		sv = NULL;
-		if (csv->keep_meta_info)
+		if (csv->keep_meta_info && fflags)
 		    av_push (fflags, newSViv (f));
 		}
 	    else
@@ -1006,7 +1011,7 @@ restart:
 		    sv_setpvn (sv, "", 0);
 		unless (csv->is_bound)
 		    av_push (fields, sv);
-		if (csv->keep_meta_info)
+		if (csv->keep_meta_info && fflags)
 		    av_push (fflags, newSViv (f));
 		return TRUE;
 		}
@@ -1212,6 +1217,14 @@ restart:
 			    AV_PUSH;
 			    return TRUE;
 			    }
+
+			if (csv->useIO && csv->eol_len == 0 && !is_csv_binary (c3)) {
+			    set_eol_is_cr (csv);
+			    csv->used--;
+			    csv->has_ahead++;
+			    AV_PUSH;
+			    return TRUE;
+			    }
 			}
 
 		    if (csv->allow_loose_escapes && csv->escape_char == csv->quote_char) {
@@ -1326,7 +1339,7 @@ restart:
 		sv_setpvn (sv, "", 0);
 	    unless (csv->is_bound)
 		av_push (fields, sv);
-	    if (csv->keep_meta_info)
+	    if (csv->keep_meta_info && fflags)
 		av_push (fflags, newSViv (f));
 	    return TRUE;
 	    }
@@ -1345,13 +1358,10 @@ restart:
     return TRUE;
     } /* Parse */
 
-#define xsParse(self,hv,av,avf,src,useIO)	cx_xsParse (aTHX_ self, hv, av, avf, src, useIO)
-static int cx_xsParse (pTHX_ SV *self, HV *hv, AV *av, AV *avf, SV *src, bool useIO)
+#define c_xsParse(csv,hv,av,avf,src,useIO)	cx_c_xsParse (aTHX_ csv, hv, av, avf, src, useIO)
+static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool useIO)
 {
-    csv_t	csv;
     int		result, ahead = 0;
-
-    SetupCsv (&csv, hv, self);
 
     if ((csv.useIO = useIO)) {
 	csv.tmp  = NULL;
@@ -1386,13 +1396,15 @@ static int cx_xsParse (pTHX_ SV *self, HV *hv, AV *av, AV *avf, SV *src, bool us
 	    }
 	csv.cache[CACHE_ID__has_ahead] = csv.has_ahead;
 
-	if (csv.keep_meta_info) {
-	    (void)hv_delete (hv, "_FFLAGS", 7, G_DISCARD);
-	    (void)hv_store  (hv, "_FFLAGS", 7, newRV_noinc ((SV *)avf), 0);
-	    }
-	else {
-	    av_undef (avf);
-	    sv_free ((SV *)avf);
+	if (avf) {
+	    if (csv.keep_meta_info) {
+		(void)hv_delete (hv, "_FFLAGS", 7, G_DISCARD);
+		(void)hv_store  (hv, "_FFLAGS", 7, newRV_noinc ((SV *)avf), 0);
+		}
+	    else {
+		av_undef (avf);
+		sv_free ((SV *)avf);
+		}
 	    }
 	}
     if (result && csv.types) {
@@ -1418,7 +1430,84 @@ static int cx_xsParse (pTHX_ SV *self, HV *hv, AV *av, AV *avf, SV *src, bool us
 	    }
 	}
     return result;
+    } /* c_xsParse */
+
+#define xsParse(self,hv,av,avf,src,useIO)	cx_xsParse (aTHX_ self, hv, av, avf, src, useIO)
+static int cx_xsParse (pTHX_ SV *self, HV *hv, AV *av, AV *avf, SV *src, bool useIO)
+{
+    csv_t	csv;
+    SetupCsv (&csv, hv, self);
+    return (c_xsParse (csv, hv, av, avf, src, useIO));
     } /* xsParse */
+
+#define av_empty(av)	cx_av_empty (aTHX_ av)
+static void cx_av_empty (pTHX_ AV *av)
+{
+    while (av_len (av) >= 0)
+	sv_free (av_pop (av));
+    } /* av_empty */
+
+#define av_free(av)	cx_av_free (aTHX_ av)
+static void cx_av_free (pTHX_ AV *av)
+{
+    av_empty (av);
+    sv_free ((SV *)av);
+    } /* av_free */
+
+#define rav_free(rv)	cx_rav_free (aTHX_ rv)
+static void cx_rav_free (pTHX_ SV *rv)
+{
+    av_free ((AV *)SvRV (rv));
+    sv_free (rv);
+    } /* rav_free */
+
+#define xsParse_all(self,hv,io,off,len)		cx_xsParse_all (aTHX_ self, hv, io, off, len)
+static SV *cx_xsParse_all (pTHX_ SV *self, HV *hv, SV *io, SV *off, SV *len)
+{
+    csv_t	csv;
+    int		n = 0, skip = 0, length = MAXINT, tail = MAXINT;
+    AV		*avr = newAV ();
+    AV		*row = newAV ();
+
+    SetupCsv (&csv, hv, self);
+    csv.keep_meta_info = 0;
+
+    if (SvIOK (off)) {
+	skip = SvIV (off);
+	if (skip < 0) {
+	    tail = -skip;
+	    skip = -1;
+	    }
+	}
+    if (SvIOK (len))
+	length = SvIV (len);
+
+    while (c_xsParse (csv, hv, row, NULL, io, 1)) {
+	if (skip > 0) {
+	    skip--;
+	    av_empty (row); /* re-use */
+	    continue;
+	    }
+
+	if (n++ >= tail) {
+	    rav_free (av_shift (avr));
+	    n--;
+	    }
+
+	av_push (avr, newRV ((SV *)row));
+
+	if (n >= length && skip >= 0)
+	    break; /* We have enough */
+
+	row = newAV ();
+	}
+    while (n > length) {
+	rav_free (av_pop (avr));
+	n--;
+	}
+
+    return (SV *)sv_2mortal (newRV_noinc ((SV *)avr));
+    } /* xsParse_all */
 
 #define xsCombine(self,hv,av,io,useIO)	cx_xsCombine (aTHX_ self, hv, av, io, useIO)
 static int cx_xsCombine (pTHX_ SV *self, HV *hv, AV *av, SV *io, bool useIO)
@@ -1507,8 +1596,8 @@ Parse (self, src, fields, fflags)
     AV	*avf;
 
     CSV_XS_SELF;
-    av  = (AV*)SvRV (fields);
-    avf = (AV*)SvRV (fflags);
+    av  = (AV *)SvRV (fields);
+    avf = (AV *)SvRV (fflags);
 
     ST (0) = xsParse (self, hv, av, avf, src, 0) ? &PL_sv_yes : &PL_sv_no;
     XSRETURN (1);
@@ -1528,7 +1617,7 @@ print (self, io, fields)
     unless (_is_arrayref (fields))
 	croak ("Expected fields to be an array ref");
 
-    av = (AV*)SvRV (fields);
+    av = (AV *)SvRV (fields);
 
     ST (0) = xsCombine (self, hv, av, io, 1) ? &PL_sv_yes : &PL_sv_no;
     XSRETURN (1);
@@ -1552,6 +1641,24 @@ getline (self, io)
 	: &PL_sv_undef;
     XSRETURN (1);
     /* XS getline */
+
+void
+getline_all (self, io, ...)
+    SV		*self
+    SV		*io
+
+  PPCODE:
+    HV	*hv;
+    SV  *offset, *length;
+
+    CSV_XS_SELF;
+
+    offset = items > 2 ? ST (2) : &PL_sv_undef;
+    length = items > 3 ? ST (3) : &PL_sv_undef;
+
+    ST (0) = xsParse_all (self, hv, io, offset, length);
+    XSRETURN (1);
+    /* XS getline_all */
 
 void
 _cache_set (self, idx, val)

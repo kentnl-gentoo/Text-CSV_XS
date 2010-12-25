@@ -30,7 +30,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA );
-$VERSION = "0.79";
+$VERSION = "0.80";
 @ISA     = qw( DynaLoader );
 bootstrap Text::CSV_XS $VERSION;
 
@@ -550,6 +550,14 @@ sub getline_hr
     @hr{@{$self->{_COLUMN_NAMES}}} = @$fr;
     \%hr;
     } # getline_hr
+
+sub getline_hr_all
+{
+    my ($self, @args, %hr) = @_;
+    $self->{_COLUMN_NAMES} or croak ($self->SetDiag (3002));
+    my @cn = @{$self->{_COLUMN_NAMES}};
+    [ map { my %h; @h{@cn} = @$_; \%h } @{$self->getline_all (@args)} ];
+    } # getline_hr_all
 
 sub types
 {
@@ -1118,6 +1126,30 @@ reference to an empty list.
 The I<$csv-E<gt>string ()>, I<$csv-E<gt>fields ()> and I<$csv-E<gt>status ()>
 methods are meaningless, again.
 
+=head2 getline_all
+
+ $arrayref = $csv->getline_all ($io);
+ $arrayref = $csv->getline_all ($io, $offset);
+ $arrayref = $csv->getline_all ($io, $offset, $length);
+
+This will return a reference to a list of C<getline ($io)> results.
+In this call, C<keep_meta_info> is disabled. If C<$offset> is negative,
+as with C<splice ()>, only the last C<abs ($offset)> records of C<$io>
+are taken into consideration.
+
+Given a CSV file with 10 lines:
+
+ lines call
+ ----- ---------------------------------------------------------
+ 0..9  $csv->getline_all ($io)         # all
+ 0..9  $csv->getline_all ($io,  0)     # all
+ 8..9  $csv->getline_all ($io,  8)     # start at 8
+ -     $csv->getline_all ($io,  0,  0) # start at 0 first 0 rows
+ 0..4  $csv->getline_all ($io,  0,  5) # start at 0 first 5 rows
+ 4..5  $csv->getline_all ($io,  4,  2) # start at 4 first 2 rows
+ 8..9  $csv->getline_all ($io, -2)     # last 2 rows
+ 6..7  $csv->getline_all ($io, -4,  2) # first 2 of last  4 rows
+
 =head2 parse
 
  $status = $csv->parse ($line);
@@ -1143,6 +1175,15 @@ first to declare your column names.
  print "Price for $hr->{name} is $hr->{price} EUR\n";
 
 C<getline_hr ()> will croak if called before C<column_names ()>.
+
+=head2 getline_hr_all
+
+ $arrayref = $csv->getline_hr_all ($io);
+ $arrayref = $csv->getline_hr_all ($io, $offset);
+ $arrayref = $csv->getline_hr_all ($io, $offset, $length);
+
+This will return a reference to a list of C<getline_hr ($io)> results.
+In this call, C<keep_meta_info> is disabled.
 
 =head2 column_names
 
@@ -1498,9 +1539,9 @@ Using C<getline ()> and C<print ()> instead is the preferred way to go.
 
 =item Parse the whole file at once
 
-Implement a new methods that enables the parsing of a complete file
-at once, returning a list of hashes. Possible extension to this could
-be to enable a column selection on the call:
+Implement new methods that enable parsing of a complete file at once,
+returning a list of hashes. Possible extension to this could be to
+enable a column selection on the call:
 
    my @AoH = $csv->parse_file ($filename, { cols => [ 1, 4..8, 12 ]});
 
@@ -1508,13 +1549,14 @@ Returning something like
 
    [ { fields => [ 1, 2, "foo", 4.5, undef, "", 8 ],
        flags  => [ ... ],
-       errors => [ ... ],
        },
      { fields => [ ... ],
        .
-       .
        },
      ]
+
+Note that C<getline_all ()> already returns all rows for an open
+stream, but this will not return flags.
 
 =item EBCDIC
 
