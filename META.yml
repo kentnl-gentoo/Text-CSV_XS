@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                    Text-CSV_XS
-version:                 0.80
+version:                 0.81
 abstract:                Comma-Separated Values manipulation routines
 license:                 perl
 author:              
@@ -10,18 +10,18 @@ distribution_type:       module
 provides:
     Text::CSV_XS:
         file:            CSV_XS.pm
-        version:         0.80
+        version:         0.81
 requires:     
     perl:                5.005
     DynaLoader:          0
     IO::Handle:          0
 recommends:     
-    perl:                5.010001
+    perl:                5.012003
 configure_requires:
     ExtUtils::MakeMaker: 0
 build_requires:
-    perl:                5.005
     Config:              0
+test_requires:
     Test::Harness:       0
     Test::More:          0
     Tie::Scalar:         0

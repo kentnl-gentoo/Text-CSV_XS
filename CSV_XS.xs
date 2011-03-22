@@ -1,4 +1,4 @@
-/*  Copyright (c) 2007-2010 H.Merijn Brand.  All rights reserved.
+/*  Copyright (c) 2007-2011 H.Merijn Brand.  All rights reserved.
  *  Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
  *  This program is free software; you can redistribute it and/or
  *  modify it under the same terms as Perl itself.
@@ -66,6 +66,7 @@
 #define CSV_FLAGS_QUO	0x0001
 #define CSV_FLAGS_BIN	0x0002
 #define CSV_FLAGS_EIF	0x0004
+#define CSV_FLAGS_MIS	0x0010
 
 #define CH_TAB		'\011'
 #define CH_NL		'\012'
@@ -748,7 +749,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	}
 
     {	STRLEN		result, rslen;
-	const char	*rs;
+	const char	*rs = NULL;
 
 	dSP;
 
@@ -846,7 +847,7 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	int x; PUT_EOLX_RPT1;			\
 	if (csv->eol_pos == -2)			\
 	    csv->size = 0;			\
-	for (x = 0; x < csv->eol_len; x++)	\
+	for (x = 0; x < (int)csv->eol_len; x++)	\
 	    CSV_PUT_SV1 (csv->eol[x]);		\
 	csv->eol_pos = -1;			\
 	PUT_EOLX_RPT2;				\
@@ -1240,7 +1241,7 @@ restart:
 	    else
 	    /* !waitingForField, !InsideQuotes */
 	    if (csv->allow_loose_quotes) { /* 1,foo "boo" d'uh,1 */
-		f |= CSV_FLAGS_EIF;
+		f |= CSV_FLAGS_EIF;	/* Mark as error-in-field */
 		CSV_PUT_SV (c);
 		}
 	    else
@@ -1556,7 +1557,7 @@ SetDiag (self, xse, ...)
 	ST (0) = SetDiag (&csv, xse);
 	}
     else
-	ST (0) = SvDiag (xse);
+	ST (0) = sv_2mortal (SvDiag (xse));
 
     if (xse && items > 1 && SvPOK (ST (2))) {
 	sv_setpvn (ST (0),  SvPVX (ST (2)), SvCUR (ST (2)));
