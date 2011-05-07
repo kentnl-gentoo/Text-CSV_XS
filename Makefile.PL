@@ -7,19 +7,6 @@ use strict;
 
 use ExtUtils::MakeMaker;
 
-eval { require Text::CSV_XS };
-if (!$@ && $Text::CSV_XS::VERSION < 0.15) {
-    print <<'MSG';
-
-You seem to have installed a previous version of the Text::CSV_XS module.
-Note that you might encounter problems in existing applications (not the
-DBD::CSV driver) due to incompatible changes in the print and getline
-methods. See "perldoc CSV_XS.pm" for details.
-
-MSG
-    sleep 5;
-    }
-
 my %wm = (
     NAME         => "Text::CSV_XS",
     ABSTRACT     => "Comma-Separated Values manipulation routines",
@@ -40,6 +27,18 @@ my %wm = (
 			 valgrind.log
 			 )
 		      },
+
+    macro        => { GCC_WALL => (join " " => qw(
+			-Wall -Wextra -Wbad-function-cast -Wcomment -Wcomments
+			-Wformat -Wdisabled-optimization -Wmissing-prototypes
+			-Werror-implicit-function-declaration -Wmissing-noreturn
+			-Wmissing-format-attribute -Wno-cast-qual -Wunused-value
+			-Wno-sign-compare -Wpointer-arith -Wreturn-type -Wshadow
+			-Wswitch-default -Wuninitialized -Wunreachable-code
+			-Wundef
+			)),
+		     "#OPTIMIZE" => "-O2 \$(GCC_WALL)",
+		    },
     );
 $ExtUtils::MakeMaker::VERSION > 6.30 and $wm{LICENSE} = "perl";
 
