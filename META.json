@@ -14,7 +14,7 @@
       },
    "distribution_type" : "module",
    "generated_by" : "Author",
-   "version" : "0.84",
+   "version" : "0.85",
    "name" : "Text-CSV_XS",
    "author" : [
       "H.Merijn Brand <h.m.brand@xs4all.nl>"
@@ -25,7 +25,7 @@
       },
    "provides" : {
       "Text::CSV_XS" : {
-         "version" : "0.84",
+         "version" : "0.85",
          "file" : "CSV_XS.pm"
          }
       },
