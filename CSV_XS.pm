@@ -27,7 +27,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA );
-$VERSION = "0.86";
+$VERSION = "0.87";
 @ISA     = qw( DynaLoader );
 bootstrap Text::CSV_XS $VERSION;
 
@@ -1223,6 +1223,32 @@ declare your column names.
  print "Price for $hr->{name} is $hr->{price} EUR\n";
 
 L</getline_hr> will croak if called before L</column_names>.
+
+Note that L</getline_hr> creates a hashref for every row and might be much
+slower than the combined use of L</bind_columns> and L</getline> but still
+offering the same ease of use hashref inside the loop:
+
+ my @cols = @{$csv->getline ($io)};
+ $csv->column_names (@cols);
+ while (my $row = $csv->getline_hr ($io)) {
+     print $row->{price};
+     }
+
+Could easily be rewritten to the much faster:
+
+ my @cols = @{$csv->getline ($io)};
+ my $row = {};
+ $csv->bind_columns (\@{$row}{@cols});
+ while ($csv->getline ($io)) {
+     print $row->{price};
+     }
+
+Your mileage may vary for the size of the data and the numbers of rows, but 
+with perl-5.14.2 the difference is like for a 100_000 line file with 14 rows:
+
+            Rate hashrefs getlines
+ hashrefs 1.00/s       --     -76%
+ getlines 4.15/s     313%       --
 
 =head2 getline_hr_all
 X<getline_hr_all>

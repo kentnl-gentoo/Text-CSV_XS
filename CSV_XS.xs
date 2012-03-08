@@ -19,6 +19,7 @@
 #include "ppport.h"
 #if (PERL_BCDVERSION <= 0x5005005)
 #  define sv_utf8_upgrade(sv)	/* no-op */
+#  define is_utf8_string(s,l)	0
 #  define SvUTF8_on(sv)		/* no-op */
 #  define SvUTF8(sv)		0
 #  endif
@@ -601,7 +602,7 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	PUSHs ((dst));
 	PUSHs (tmp);
 	PUTBACK;
-	if (csv->utf8)
+	if (csv->utf8 && is_utf8_string (SvPV_nolen (tmp), 0))
 	    SvUTF8_on (tmp);
 	result = call_sv (m_print, G_SCALAR | G_METHOD);
 	SPAGAIN;
@@ -617,7 +618,7 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	sv_catpvn (SvRV (dst), csv->buffer, csv->used);
 	result = TRUE;
 	}
-    if (csv->utf8 && SvROK (dst))
+    if (csv->utf8 && SvROK (dst) && is_utf8_string (SvPV_nolen (SvRV (dst)), 0))
 	SvUTF8_on (SvRV (dst));
     csv->used = 0;
     return result;
