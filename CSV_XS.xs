@@ -19,9 +19,11 @@
 #include "ppport.h"
 #if (PERL_BCDVERSION <= 0x5005005)
 #  define sv_utf8_upgrade(sv)	/* no-op */
-#  define is_utf8_string(s,l)	0
+#  define is_utf8_sv(s)		0
 #  define SvUTF8_on(sv)		/* no-op */
 #  define SvUTF8(sv)		0
+#else
+#  define is_utf8_sv(s) is_utf8_string ((U8 *)SvPV_nolen (s), 0)
 #  endif
 #ifndef PERLIO_F_UTF8
 #  define PERLIO_F_UTF8	0x00008000
@@ -602,7 +604,7 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	PUSHs ((dst));
 	PUSHs (tmp);
 	PUTBACK;
-	if (csv->utf8 && is_utf8_string (SvPV_nolen (tmp), 0))
+	if (csv->utf8 && is_utf8_sv (tmp))
 	    SvUTF8_on (tmp);
 	result = call_sv (m_print, G_SCALAR | G_METHOD);
 	SPAGAIN;
@@ -618,7 +620,7 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	sv_catpvn (SvRV (dst), csv->buffer, csv->used);
 	result = TRUE;
 	}
-    if (csv->utf8 && SvROK (dst) && is_utf8_string (SvPV_nolen (SvRV (dst)), 0))
+    if (csv->utf8 && SvROK (dst) && is_utf8_sv (SvRV (dst)))
 	SvUTF8_on (SvRV (dst));
     csv->used = 0;
     return result;
@@ -757,31 +759,20 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	return CH_EOLX;
 	}
 
-    {	STRLEN		result, rslen;
-	const char	*rs = NULL;
-
+    {	STRLEN		result;
 	dSP;
 
 	require_IO_Handle;
 
-	ENTER;
 	PUSHMARK (sp);
 	EXTEND (sp, 1);
 	PUSHs (src);
 	PUTBACK;
-
-	csv->eol_pos = -1;
-	if (csv->eolx || csv->eol_is_cr) {
-	    /* local $\ = $eol */
-	    SAVEGENERICSV (PL_rs);
-	    PL_rs = newSVpvn ((char *)csv->eol, csv->eol_len);
-	    }
-
 	result = call_sv (m_getline, G_SCALAR | G_METHOD);
-	csv->tmp = result ? POPs : NULL;
 	SPAGAIN;
+	csv->eol_pos = -1;
+	csv->tmp = result ? POPs : NULL;
 	PUTBACK;
-	LEAVE;
 
 #if MAINT_DEBUG > 4
 	fprintf (stderr, "getline () returned:\n");
@@ -1373,6 +1364,13 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 {
     int		result, ahead = 0;
 
+    ENTER;
+    if (csv.eolx || csv.eol_is_cr) {
+	/* local $\ = $eol */
+	SAVEGENERICSV (PL_rs);
+	PL_rs = newSVpvn ((char *)csv.eol, csv.eol_len);
+	}
+
     if ((csv.useIO = useIO)) {
 	csv.tmp  = NULL;
 	if ((ahead = csv.has_ahead)) {
@@ -1439,6 +1437,9 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 		}
 	    }
 	}
+
+    LEAVE;
+
     return result;
     } /* c_xsParse */
 
