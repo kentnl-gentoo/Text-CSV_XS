@@ -17,14 +17,7 @@
 #define NEED_sv_2pv_flags
 #define NEED_vload_module
 #include "ppport.h"
-#if (PERL_BCDVERSION <= 0x5005005)
-#  define sv_utf8_upgrade(sv)	/* no-op */
-#  define is_utf8_sv(s)		0
-#  define SvUTF8_on(sv)		/* no-op */
-#  define SvUTF8(sv)		0
-#else
-#  define is_utf8_sv(s) is_utf8_string ((U8 *)SvPV_nolen (s), 0)
-#  endif
+#define is_utf8_sv(s) is_utf8_string ((U8 *)SvPV_nolen (s), 0)
 #ifndef PERLIO_F_UTF8
 #  define PERLIO_F_UTF8	0x00008000
 #  endif
@@ -202,15 +195,15 @@ xs_error_t xs_errors[] =  {
     };
 
 static int  io_handle_loaded = 0;
-static SV  *m_getline, *m_print;
+static SV  *m_getline, *m_print, *m_tell, *m_seek, *m_read;
 
-#define require_IO_Handle				\
-    unless (io_handle_loaded) {				\
-	ENTER;						\
-	load_module (PERL_LOADMOD_NOIMPORT,		\
-	    newSVpvs ("IO::Handle"), NULL, NULL, NULL);	\
-	LEAVE;						\
-	io_handle_loaded = 1;				\
+#define require_IO_Handle \
+    unless (io_handle_loaded) {\
+	ENTER;\
+	Perl_load_module (aTHX_ PERL_LOADMOD_NOIMPORT,\
+	    newSVpvs ("IO::Handle"), NULL, NULL, NULL);\
+	LEAVE;\
+	io_handle_loaded = 1;\
 	}
 
 #define is_whitespace(ch) \
@@ -876,17 +869,17 @@ int CSV_GET_ (csv_t *csv, SV *src, int l)
 
 #define AV_PUSH { \
     *SvEND (sv) = (char)0;					\
-    if (SvCUR (sv) == 0 && (csv->empty_is_undef || (!(f & CSV_FLAGS_QUO) && csv->blank_is_undef))) {\
+    SvUTF8_off (sv);						\
+    if (SvCUR (sv) == 0 && (csv->empty_is_undef || (!(f & CSV_FLAGS_QUO) && csv->blank_is_undef)))\
 	sv_setpvn (sv, NULL, 0);				\
-	unless (csv->is_bound) av_push (fields, sv);		\
-	}							\
     else {							\
 	if (csv->allow_whitespace && ! (f & CSV_FLAGS_QUO))	\
 	    strip_trail_whitespace (sv);			\
 	if (f & CSV_FLAGS_BIN && csv->utf8)			\
 	    SvUTF8_on (sv);					\
-	unless (csv->is_bound) av_push (fields, sv);		\
 	}							\
+    SvSETMAGIC (sv);						\
+    unless (csv->is_bound) av_push (fields, sv);		\
     PUSH_RPT;							\
     sv = NULL;							\
     if (csv->keep_meta_info && fflags)				\
@@ -1362,7 +1355,8 @@ restart:
 #define c_xsParse(csv,hv,av,avf,src,useIO)	cx_c_xsParse (aTHX_ csv, hv, av, avf, src, useIO)
 static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool useIO)
 {
-    int		result, ahead = 0;
+    int	result, ahead = 0;
+    SV	*pos = NULL;
 
     ENTER;
     if (csv.eolx || csv.eol_is_cr) {
@@ -1372,12 +1366,35 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 	}
 
     if ((csv.useIO = useIO)) {
-	csv.tmp  = NULL;
+	/* If on a IO handle, I can save the current position with
+	 * IO::Seekable::tell, so I can reconstruct the last record
+	 * in case of parse error. See after Parse ()
+	 *   pos = $io->tell ();
+	 */
+	dSP;
+	require_IO_Handle;
+
+	csv.tmp = NULL;
+
+#if (PERL_BCDVERSION >= 0x5014000)
+	PUSHMARK (sp);
+	EXTEND (sp, 1);
+	PUSHs (src);
+	PUTBACK;
+	result = call_sv (m_tell, G_SCALAR | G_METHOD);
+	/* result = Perl_pp_tell (aTHX_); ? */
+	SPAGAIN;
+	pos = result ? POPs : NULL;
+	PUTBACK;
+#endif
+
 	if ((ahead = csv.has_ahead)) {
 	    SV **svp;
 	    if ((svp = hv_fetchs (hv, "_AHEAD", FALSE)) && *svp) {
 		csv.bptr = SvPV (csv.tmp = *svp, csv.size);
 		csv.used = 0;
+		if (pos && SvIV (pos) > csv.size)
+		    sv_setiv (pos, SvIV (pos) - csv.size);
 		}
 	    }
 	}
@@ -1389,6 +1406,7 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
     (void)hv_delete (hv, "_ERROR_INPUT", 12, G_DISCARD);
 
     result = Parse (&csv, src, av, avf);
+    sv_inc (*(hv_fetchs (hv, "_RECNO", FALSE)));
 
     (void)hv_store (hv, "_EOF", 4, &PL_sv_no,  0);
     if (csv.useIO) {
@@ -1414,6 +1432,58 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 		sv_free ((SV *)avf);
 		}
 	    }
+
+#if (PERL_BCDVERSION >= 0x5014000)
+	if (!result && pos && !(csv.useIO & useIO_EOF)) {	/* We have a FAIL */
+	    /* Restore the complete source for this failing Parse () if possible
+	     * if (Failed && pos && now = $io->tell && now > pos) {
+	     *     $io->seek (pos, 0);
+	     *     read ($io, $csv->{_ERROR_INPUT}, now - pos);
+	     *     }
+	     */
+	    SV *now = NULL;
+	    int can = 0, r;
+
+	    /* now = $io->tell */
+	    dSP;
+	    PUSHMARK (sp);
+	    EXTEND (sp, 1);
+	    PUSHs (src);
+	    PUTBACK;
+	    r = call_sv (m_tell, G_SCALAR | G_METHOD);
+	    SPAGAIN;
+	    now = r ? POPs : NULL;
+	    PUTBACK;
+
+	    if (now && SvIV (now) > SvIV (pos)) {
+		/* $io->seek (pos, 0) */
+		PUSHMARK (sp);
+		EXTEND (sp, 3);
+		PUSHs (src);
+		PUSHs (pos);
+		PUSHs (sv_2mortal (newSViv (0)));
+		PUTBACK;
+		r = call_sv (m_seek, G_SCALAR | G_METHOD);
+		SPAGAIN;
+		if (r && SvTRUE (TOPs)) can = 1;
+		PUTBACK;
+
+		if (can) {
+		    int buflen = SvIV (now) - SvIV (pos);
+		    SV *ei = newSV (buflen);
+		    /* read ($io, $csv->{_ERROR_INPUT}, now - pos) */
+		    PUSHMARK (sp);
+		    EXTEND (sp, 3);
+		    PUSHs (src);
+		    PUSHs (ei);
+		    PUSHs (newSViv (buflen));
+		    PUTBACK;
+		    if (call_sv (m_read, G_SCALAR | G_METHOD))
+			(void)hv_store (hv, "_ERROR_INPUT", 12, ei, 0);
+		    }
+		}
+	    }
+#endif
 	}
     if (result && csv.types) {
 	I32	i;
@@ -1551,6 +1621,9 @@ PROTOTYPES: DISABLE
 BOOT:
     m_getline = newSVpvs ("getline");
     m_print   = newSVpvs ("print");
+    m_tell    = newSVpvs ("tell");
+    m_seek    = newSVpvs ("seek");
+    m_read    = newSVpvs ("read");
 
 void
 SetDiag (self, xse, ...)

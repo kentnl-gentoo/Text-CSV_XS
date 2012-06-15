@@ -1,18 +1,9 @@
 #!/usr/bin/perl
 
 use strict;
-$^W = 1;	# use warnings;
+use warnings;
 
-use Test::More;
-
-BEGIN {
-    if ($] < 5.006) {
-	plan skip_all => "No lexical file handles in in this ancient perl version";
-	}
-    else {
-	plan tests => 105;
-	}
-    }
+use Test::More tests => 105;
 
 BEGIN {
     use_ok "Text::CSV_XS";
