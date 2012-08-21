@@ -1,3 +1,9 @@
+0.91	- 2012-08-21, H.Merijn Brand
+    * Prevent test-failures for long doubles on weird architectures
+    * More utf-8 tests for te change of 0.90
+    * Update test case now 5.005 is not supported anymore
+    * Rip out the tell/seek introduced in 0.90
+
 0.90	- 2012-06-15, H.Merijn Brand
     * Drop 5.005 support (5.6.1 is now minimum)
     * Introduce record_number

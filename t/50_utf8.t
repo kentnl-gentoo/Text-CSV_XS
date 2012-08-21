@@ -10,7 +10,7 @@ BEGIN {
 	plan skip_all => "UTF8 tests useless in this ancient perl version";
 	}
     else {
-	plan tests => 75;
+	plan tests => 91;
 	}
     }
 
@@ -57,9 +57,7 @@ foreach my $test (
     my @out = $csv->fields;
     # Cannot use is_deeply (), because of the binary content
     is (scalar @in, scalar @out,	"fields  $msg");
-    for (0 .. $#in) {
-	is_binary ($in[$_], $out[$_],	"field $_ $msg");
-	}
+    is_binary ($in[$_], $out[$_],	"field $_ $msg") for 0 .. $#in;
     }
 
 # Test if the UTF8 part is accepted, but the \n is not
@@ -67,7 +65,6 @@ is ($csv->parse (qq{"\x{0123}\n\x{20ac}"}), 0, "\\n still needs binary");
 is ($csv->binary, 0, "bin flag still unset");
 is ($csv->error_diag + 0, 2021, "Error 2021");
 
-# As all utf tests are skipped for older pers, It's safe to use 3-arg open this way
 my $file = "files/utf8.csv";
 SKIP: {
     open my $fh, "<:encoding(utf8)", $file or
@@ -101,6 +98,35 @@ $csv->quote_space  (1);
 $csv->quote_binary (0);
 ok ($csv->combine (" ", 1, "\x{20ac} "),	"Combine");
 is ($csv->string, qq{" ",1,"\x{20ac} "},	"String 1-0");
-$csv->quote_binary (1);
+ok ($csv->quote_binary (1),			"quote binary on");
 ok ($csv->combine (" ", 1, "\x{20ac} "),	"Combine");
 is ($csv->string, qq{" ",1,"\x{20ac} "},	"String 1-1");
+
+open  my $fh, ">:encoding(utf-8)", "_50test.csv";
+print $fh "euro\n\x{20ac}\neuro\n";
+close $fh;
+open     $fh, "<:encoding(utf-8)", "_50test.csv";
+
+SKIP: {
+    my $out = "";
+    my $isutf8 = $] < 5.008001 ?
+	sub { !$_[0]; } :	# utf8::is_utf8 () not available in 5.8.0
+	sub { utf8::is_utf8 ($out); };
+    ok ($csv->auto_diag (1),			"auto diag");
+    ok ($csv->binary (1),   			"set binary");
+    ok ($csv->bind_columns (\$out),		"bind");
+    ok ($csv->getline ($fh),			"parse");
+    is ($csv->is_binary (0),	0,		"not binary");
+    is ($out,			"euro",		"euro");
+    ok (!$isutf8->(1),				"not utf8");
+    ok ($csv->getline ($fh),			"parse");
+    is ($csv->is_binary (0),	1,		"is binary");
+    is ($out,			"\x{20ac}",	"euro");
+    ok ($isutf8->(0),				"is utf8");
+    ok ($csv->getline ($fh),			"parse");
+    is ($csv->is_binary (0),	0,		"not binary");
+    is ($out,			"euro",		"euro");
+    ok (!$isutf8->(1),				"not utf8");
+    close $fh;
+    unlink "_50test.csv";
+    }
