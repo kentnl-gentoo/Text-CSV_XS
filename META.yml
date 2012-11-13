@@ -1,33 +1,44 @@
---- #YAML:1.0
-name:                    Text-CSV_XS
-version:                 0.91
-abstract:                Comma-Separated Values manipulation routines
-license:                 perl
-author:              
-    - H.Merijn Brand <h.m.brand@xs4all.nl>
-generated_by:            Author
-distribution_type:       module
-provides:
-    Text::CSV_XS:
-        file:            CSV_XS.pm
-        version:         0.91
-requires:     
-    perl:                5.006001
-    DynaLoader:          0
-    IO::Handle:          0
-recommends:     
-    perl:                5.016000
-configure_requires:
-    ExtUtils::MakeMaker: 0
-build_requires:
-    Config:              0
-test_requires:
-    Test::Harness:       0
-    Test::More:          0
-    Tie::Scalar:         0
-resources:
-    license:             http://dev.perl.org/licenses/
-    repository:          http://repo.or.cz/w/Text-CSV_XS.git
-meta-spec:
-    version:             1.4
-    url:                 http://module-build.sourceforge.net/META-spec-v1.4.html
+--- 
+abstract: Comma-Separated Values manipulation routines
+author: 
+  - H.Merijn Brand <h.m.brand@xs4all.nl>
+dynamic_config: 1
+generated_by: Author
+license: 
+  - perl_5
+meta-spec: 
+  url: http://search.cpan.org/perldoc?CPAN::Meta::Spec
+  version: 2
+name: Text-CSV_XS
+prereqs: 
+  build: 
+    requires: 
+      Config: 0
+  configure: 
+    requires: 
+      ExtUtils::MakeMaker: 0
+  runtime: 
+    recommends: 
+      perl: '5.016002'
+    requires: 
+      DynaLoader: 0
+      IO::Handle: 0
+      perl: '5.006001'
+  test: 
+    requires: 
+      Test::Harness: 0
+      Test::More: 0
+      Tie::Scalar: 0
+provides: 
+  Text::CSV_XS: 
+    file: CSV_XS.pm
+    version: '0.92'
+release_status: stable
+resources: 
+  license: 
+    - http://dev.perl.org/licenses/
+  repository: 
+    type: git
+    url: http://repo.or.cz/r/Text-CSV_XS.git
+    web: http://repo.or.cz/w/Text-CSV_XS.git
+version: '0.92'
