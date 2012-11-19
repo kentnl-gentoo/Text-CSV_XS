@@ -19,6 +19,7 @@ prereqs:
       ExtUtils::MakeMaker: 0
   runtime: 
     recommends: 
+      Encode: '2.47'
       perl: '5.016002'
     requires: 
       DynaLoader: 0
@@ -26,13 +27,14 @@ prereqs:
       perl: '5.006001'
   test: 
     requires: 
+      Encode: 0
       Test::Harness: 0
       Test::More: 0
       Tie::Scalar: 0
 provides: 
   Text::CSV_XS: 
     file: CSV_XS.pm
-    version: '0.92'
+    version: '0.93'
 release_status: stable
 resources: 
   license: 
@@ -41,4 +43,4 @@ resources:
     type: git
     url: http://repo.or.cz/r/Text-CSV_XS.git
     web: http://repo.or.cz/w/Text-CSV_XS.git
-version: '0.92'
+version: '0.93'
