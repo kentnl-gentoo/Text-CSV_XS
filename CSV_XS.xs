@@ -194,6 +194,7 @@ xs_error_t xs_errors[] =  {
     {    0, "" },
     };
 
+static char init_cache[CACHE_SIZE];
 static int  io_handle_loaded = 0;
 static SV  *m_getline, *m_print, *m_read;
 
@@ -223,7 +224,7 @@ static SV *cx_SvDiag (pTHX_ int xse)
 
     while (xs_errors[i].xs_errno && xs_errors[i].xs_errno != xse) i++;
     if ((err = newSVpv (xs_errors[i].xs_errstr, 0))) {
-	SvUPGRADE (err, SVt_PVIV);
+	(void)SvUPGRADE (err, SVt_PVIV);
 	SvIV_set  (err, xse);
 	SvIOK_on  (err);
 	}
@@ -522,9 +523,8 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->verbatim			= bool_opt ("verbatim");
 	csv->auto_diag			= bool_opt ("auto_diag");
 
-	sv_cache = newSVpvn ("", CACHE_SIZE);
+	sv_cache = newSVpvn (init_cache, CACHE_SIZE);
 	csv->cache = (byte *)SvPVX (sv_cache);
-	memset (csv->cache, 0, CACHE_SIZE);
 	SvREADONLY_on (sv_cache);
 
 	csv->cache[CACHE_ID_quote_char]			= csv->quote_char;
@@ -1274,9 +1274,12 @@ restart:
 	    fprintf (stderr, "# %d/%d/%02x pos %d = ESC '%c'\n",
 		waitingForField ? 1 : 0, sv ? 1 : 0, f, spl, c);
 #endif
-	    /*  This means quote_char != escape_char  */
-	    if (waitingForField)
+	    /* This means quote_char != escape_char */
+	    if (waitingForField) {
 		waitingForField = 0;
+		/* The escape character is the first character of an unquoted field */
+		/* sv_setpvn (sv, "", 0); */
+		}
 	    else
 	    if (f & CSV_FLAGS_QUO) {
 		int c2 = CSV_GET;
@@ -1494,13 +1497,6 @@ static void cx_av_free (pTHX_ AV *av)
     sv_free ((SV *)av);
     } /* av_free */
 
-#define rav_free(rv)	cx_rav_free (aTHX_ rv)
-static void cx_rav_free (pTHX_ SV *rv)
-{
-    av_free ((AV *)SvRV (rv));
-    sv_free (rv);
-    } /* rav_free */
-
 #define xsParse_all(self,hv,io,off,len)		cx_xsParse_all (aTHX_ self, hv, io, off, len)
 static SV *cx_xsParse_all (pTHX_ SV *self, HV *hv, SV *io, SV *off, SV *len)
 {
@@ -1530,11 +1526,11 @@ static SV *cx_xsParse_all (pTHX_ SV *self, HV *hv, SV *io, SV *off, SV *len)
 	    }
 
 	if (n++ >= tail) {
-	    rav_free (av_shift (avr));
+	    SvREFCNT_dec (av_shift (avr));
 	    n--;
 	    }
 
-	av_push (avr, newRV ((SV *)row));
+	av_push (avr, newRV_noinc ((SV *)row));
 
 	if (n >= length && skip >= 0)
 	    break; /* We have enough */
@@ -1542,7 +1538,7 @@ static SV *cx_xsParse_all (pTHX_ SV *self, HV *hv, SV *io, SV *off, SV *len)
 	row = newAV ();
 	}
     while (n > length) {
-	rav_free (av_pop (avr));
+	SvREFCNT_dec (av_pop (avr));
 	n--;
 	}
 

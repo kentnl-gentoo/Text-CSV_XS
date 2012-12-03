@@ -26,15 +26,16 @@ prereqs:
       IO::Handle: 0
       perl: '5.006001'
   test: 
+    recommends: 
+      Encode: '2.47'
     requires: 
-      Encode: 0
       Test::Harness: 0
       Test::More: 0
       Tie::Scalar: 0
 provides: 
   Text::CSV_XS: 
     file: CSV_XS.pm
-    version: '0.93'
+    version: '0.94'
 release_status: stable
 resources: 
   license: 
@@ -43,4 +44,4 @@ resources:
     type: git
     url: http://repo.or.cz/r/Text-CSV_XS.git
     web: http://repo.or.cz/w/Text-CSV_XS.git
-version: '0.93'
+version: '0.94'

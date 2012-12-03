@@ -4,8 +4,7 @@ use strict;
 use warnings;
 
 #use Test::More "no_plan";
- use Test::More tests => 20449;
- use Encode "encode";
+ use Test::More tests => 20450;
 
 BEGIN {
     use_ok "Text::CSV_XS", ();
@@ -384,7 +383,7 @@ while (<DATA>) {
 	}
     }
 
-SKIP: {   # http://rt.cpan.org/Ticket/Display.html?id=74220
+SKIP: {	# http://rt.cpan.org/Ticket/Display.html?id=74220
     $] < 5.008002 and skip "UTF8 unreliable in perl $]", 7;
 
     $rt = "74220"; # Text::CSV_XS can be made to produce bad strings
@@ -407,9 +406,10 @@ SKIP: {   # http://rt.cpan.org/Ticket/Display.html?id=74220
     is ($foo, qq{\xfa,foo}, "expected result");
     }
 
-SKIP: {   # http://rt.cpan.org/Ticket/Display.html?id=80680
-    $] < 5.008002           and skip "UTF8 unreliable in perl $]",        20000;
-    $Encode::VERSION < 2.47 and skip "Encode is too old for these tests", 20000;
+SKIP: {	# http://rt.cpan.org/Ticket/Display.html?id=80680
+    (eval { require Encode; $Encode::VERSION } || "0.00") =~ m{^([0-9.]+)};
+    $1 < 2.47     and skip "Encode is too old for these tests", 20000;
+    $] < 5.008008 and skip "UTF8+Encode unreliable in perl $]", 20000;
 
     $rt = "80680"; # Text::CSV_XS produces garbage on some data
 
@@ -419,7 +419,7 @@ SKIP: {   # http://rt.cpan.org/Ticket/Display.html?id=80680
 	foreach my $e (0 .. 3) {
 
 	    my $data = ("a" x $e) . ($txt x $n);
-	    my $enc  = encode ("UTF-8", $data);
+	    my $enc  = Encode::encode ("UTF-8", $data);
 	    my $exp  = qq{1,"$enc"};
 	    my $out  = "";
 	    open my $fh, ">:encoding(utf-8)", \$out;
@@ -436,6 +436,15 @@ SKIP: {   # http://rt.cpan.org/Ticket/Display.html?id=80680
 	    last BIG_LOOP;
 	    }
 	}
+    }
+
+{   # http://rt.cpan.org/Ticket/Display.html?id=81295
+    $rt = 81295; # escaped sep_char discarded when only item in unquoted field
+    my $csv = Text::CSV_XS->new ({ escape_char => "\\", auto_diag => 1 });
+    $csv->parse ($input{$rt}[0]);
+    is_deeply ([ $csv->fields ], [ 1, ",", 3 ], "escaped sep in quoted field");
+    #$csv->parse ($input{$rt}[1]);
+    #is_deeply ([ $csv->fields ], [ 1, ",", 3 ], "escaped sep in unquoted field");
     }
 
 __END__
@@ -489,6 +498,9 @@ B:035_03_	fission, one	horns	@p 03-035.bmp	@p 03-035.bmp			obsolete Heising ex
 7,8
 «74330» - Text::CSV_XS can be made to produce bad strings
 «80680» - Text::CSV_XS produces garbage on some data
+«81295» - escaped sep_char discarded when only item in unquoted field
+1,"\,",3
+1,\,,3
 «x1001» - Lines starting with "0" (Ruslan Dautkhanov)
 "0","A"
 "0","A"
