@@ -1,8 +1,8 @@
 package Text::CSV_XS;
 
-# Copyright (c) 2007-2012 H.Merijn Brand.  All rights reserved.
+# Copyright (c) 2007-2013 H.Merijn Brand.  All rights reserved.
 # Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
-# Portions Copyright (c) 1997 Alan Citterman. All rights reserved.
+# Copyright (c) 1997 Alan Citterman.       All rights reserved.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the same terms as Perl itself.
@@ -27,7 +27,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA );
-$VERSION = "0.94";
+$VERSION = "0.95";
 @ISA     = qw( DynaLoader );
 bootstrap Text::CSV_XS $VERSION;
 
@@ -51,35 +51,36 @@ sub version
 #   a newly created Text::CSV object.
 
 my %def_attr = (
-    quote_char		=> '"',
-    escape_char		=> '"',
-    sep_char		=> ',',
-    eol			=> '',
-    always_quote	=> 0,
-    quote_space		=> 1,
-    quote_null		=> 1,
-    quote_binary	=> 1,
-    binary		=> 0,
-    keep_meta_info	=> 0,
-    allow_loose_quotes	=> 0,
-    allow_loose_escapes	=> 0,
-    allow_whitespace	=> 0,
-    blank_is_undef	=> 0,
-    empty_is_undef	=> 0,
-    verbatim		=> 0,
-    auto_diag		=> 0,
-    types		=> undef,
+    quote_char			=> '"',
+    escape_char			=> '"',
+    sep_char			=> ',',
+    eol				=> '',
+    always_quote		=> 0,
+    quote_space			=> 1,
+    quote_null			=> 1,
+    quote_binary		=> 1,
+    binary			=> 0,
+    keep_meta_info		=> 0,
+    allow_loose_quotes		=> 0,
+    allow_loose_escapes		=> 0,
+    allow_unquoted_escape	=> 0,
+    allow_whitespace		=> 0,
+    blank_is_undef		=> 0,
+    empty_is_undef		=> 0,
+    verbatim			=> 0,
+    auto_diag			=> 0,
+    types			=> undef,
 
-    _EOF		=> 0,
-    _RECNO		=> 0,
-    _STATUS		=> undef,
-    _FIELDS		=> undef,
-    _FFLAGS		=> undef,
-    _STRING		=> undef,
-    _ERROR_INPUT	=> undef,
-    _COLUMN_NAMES	=> undef,
-    _BOUND_COLUMNS	=> undef,
-    _AHEAD		=> undef,
+    _EOF			=> 0,
+    _RECNO			=> 0,
+    _STATUS			=> undef,
+    _FIELDS			=> undef,
+    _FFLAGS			=> undef,
+    _STRING			=> undef,
+    _ERROR_INPUT		=> undef,
+    _COLUMN_NAMES		=> undef,
+    _BOUND_COLUMNS		=> undef,
+    _AHEAD			=> undef,
     );
 my $last_new_err = Text::CSV_XS->SetDiag (0);
 
@@ -135,25 +136,25 @@ sub new
 
 # Keep in sync with XS!
 my %_cache_id = ( # Only expose what is accessed from within PM
-    quote_char		=>  0,
-    escape_char		=>  1,
-    sep_char		=>  2,
-    binary		=>  3,
-    keep_meta_info	=>  4,
-    always_quote	=>  5,
-    allow_loose_quotes	=>  6,
-    allow_loose_escapes	=>  7,
-    allow_double_quoted	=>  8,
-    allow_whitespace	=>  9,
-    blank_is_undef	=> 10,
-    eol			=> 11,	# 11 .. 18
-    verbatim		=> 22,
-    empty_is_undef	=> 23,
-    auto_diag		=> 24,
-    quote_space		=> 25,
-    quote_null		=> 31,
-    quote_binary	=> 32,
-    _is_bound		=> 26,	# 26 .. 29
+    quote_char			=>  0,
+    escape_char			=>  1,
+    sep_char			=>  2,
+    binary			=>  3,
+    keep_meta_info		=>  4,
+    always_quote		=>  5,
+    allow_loose_quotes		=>  6,
+    allow_loose_escapes		=>  7,
+    allow_unquoted_escape	=>  8,
+    allow_whitespace		=>  9,
+    blank_is_undef		=> 10,
+    eol				=> 11,	# 11 .. 18
+    verbatim			=> 22,
+    empty_is_undef		=> 23,
+    auto_diag			=> 24,
+    quote_space			=> 25,
+    quote_null			=> 31,
+    quote_binary		=> 32,
+    _is_bound			=> 26,	# 26 .. 29
     );
 
 # A `character'
@@ -295,6 +296,13 @@ sub allow_whitespace
 	}
     $self->{allow_whitespace};
     } # allow_whitespace
+
+sub allow_unquoted_escape
+{
+    my $self = shift;
+    @_ and $self->_set_attr_X ("allow_unquoted_escape", shift);
+    $self->{allow_unquoted_escape};
+    } # allow_unquoted_escape
 
 sub blank_is_undef
 {
@@ -588,6 +596,14 @@ sub getline_hr_all
     [ map { my %h; @h{@cn} = @$_; \%h } @{$self->getline_all (@args)} ];
     } # getline_hr_all
 
+sub print_hr
+{
+    my ($self, $io, $hr) = @_;
+    $self->{_COLUMN_NAMES} or croak ($self->SetDiag (3009));
+    ref $hr eq "HASH"      or croak ($self->SetDiag (3010));
+    $self->print ($io, [ map { $hr->{$_} } $self->column_names ]);
+    } # print_hr
+
 sub types
 {
     my $self = shift;
@@ -650,8 +666,9 @@ perhaps better called ASV (anything separated values) rather than just CSV.
 B<Important Note>: The default behavior is to only accept ASCII characters.
 This means that fields can not contain newlines. If your data contains
 newlines embedded in fields, or characters above 0x7e (tilde), or binary
-data, you B<I<must>> set C<< binary => 1 >> in the call to L</new>. To cover
-the widest range of parsing options, you will always want to set binary.
+data, you B<I<must>> set C<< binary => 1 >> in the call to L</new>. To
+cover the widest range of parsing options, you will always want to set
+binary.
 
 But you still have the problem that you have to pass a correct line to the
 L</parse> method, which is more complicated from the usual point of usage:
@@ -968,6 +985,19 @@ would result in a parse error. Though it is still bad practice to allow
 this format, this option enables you to treat all escape character
 sequences equal.
 
+=item allow_unquoted_escape
+X<allow_unquoted_escape>
+
+There is a backward compatibility issue in that the escape character, when
+differing from the quotation character, cannot be on the first position of
+a field. e.g. with C<quote_char> equal to the default C<"> and
+C<escape_char> set to C<\>, this would be illegal:
+
+ 1,\0,2
+
+To overcome issues with backward compatibility, you can allow this by
+setting this attribute to 1.
+
 =item binary
 X<binary>
 
@@ -983,9 +1013,9 @@ setting C<{ binary => 1 }> is still a wise option.
 =item types
 X<types>
 
-A set of column types; this attribute is immediately passed to the L</types>
-method. You must not set this attribute otherwise, except for using the
-L</types> method.
+A set of column types; this attribute is immediately passed to the
+L</types> method. You must not set this attribute otherwise, except for
+using the L</types> method.
 
 =item always_quote
 X<always_quote>
@@ -1084,23 +1114,24 @@ To sum it up,
 is equivalent to
 
  $csv = Text::CSV_XS->new ({
-     quote_char          => '"',
-     escape_char         => '"',
-     sep_char            => ',',
-     eol                 => $\,
-     always_quote        => 0,
-     quote_space         => 1,
-     quote_null	         => 1,
-     quote_binary        => 1,
-     binary              => 0,
-     keep_meta_info      => 0,
-     allow_loose_quotes  => 0,
-     allow_loose_escapes => 0,
-     allow_whitespace    => 0,
-     blank_is_undef      => 0,
-     empty_is_undef      => 0,
-     verbatim            => 0,
-     auto_diag           => 0,
+     quote_char            => '"',
+     escape_char           => '"',
+     sep_char              => ',',
+     eol                   => $\,
+     always_quote          => 0,
+     quote_space           => 1,
+     quote_null	           => 1,
+     quote_binary          => 1,
+     binary                => 0,
+     keep_meta_info        => 0,
+     allow_loose_quotes    => 0,
+     allow_loose_escapes   => 0,
+     allow_unquoted_escape => 0,
+     allow_whitespace      => 0,
+     blank_is_undef        => 0,
+     empty_is_undef        => 0,
+     verbatim              => 0,
+     auto_diag             => 0,
      });
 
 For all of the above mentioned flags, there is an accessor method available
@@ -1137,9 +1168,9 @@ For performance reasons the print method does not create a result string.
 In particular the L</string>, L</status>, L</fields>, and L</error_input>
 methods are meaningless after executing this method.
 
-If C<$colref> is undef (explicit, not through a variable) and L</bind_columns>
-was used to specify fields to be printed, one can gain speed when otherwise
-data would have to be copied as arguments:
+If C<$colref> is undef (explicit, not through a variable) and
+L</bind_columns> was used to specify fields to be printed, one can gain
+speed when otherwise data would have to be copied as arguments:
 
  $csv->bind_columns (\($foo, $bar));
  $status = $csv->print ($fh, undef);
@@ -1260,8 +1291,9 @@ Could easily be rewritten to the much faster:
      print $row->{price};
      }
 
-Your mileage may vary for the size of the data and the numbers of rows, but 
-with perl-5.14.2 the difference is like for a 100_000 line file with 14 rows:
+Your mileage may vary for the size of the data and the numbers of rows,
+but with perl-5.14.2 the difference is like for a 100_000 line file with
+14 rows:
 
             Rate hashrefs getlines
  hashrefs 1.00/s       --     -76%
@@ -1276,6 +1308,18 @@ X<getline_hr_all>
 
 This will return a reference to a list of L<getline_hr ($io)|/getline_hr>
 results.  In this call, C<keep_meta_info> is disabled.
+
+=head2 print_hr
+X<print_hr>
+
+ $csv->print_hr ($io, $ref);
+
+Provides an easy way to print a C<$ref> as fetched with L<getline_hr>
+provided the column names are set with L<column_names>.
+
+It is no more than a wrapper method with basic parameter checks over
+
+ $csv->print ($io, [ map { $ref->{$_} } $csv->column_names ]);
 
 =head2 column_names
 X<column_names>
@@ -1304,10 +1348,11 @@ L</column_names> croaks on invalid arguments.
 =head2 bind_columns
 X<bind_columns>
 
-Takes a list of references to scalars to be printed with L</print> or to store
-the fields fetched by L</getline> in. When you don't pass enough references to
-store the fetched fields in, L</getline> will fail. If you pass more than
-there are fields to return, the remaining references are left untouched.
+Takes a list of references to scalars to be printed with L</print> or to
+store the fields fetched by L</getline> in. When you don't pass enough
+references to store the fetched fields in, L</getline> will fail. If you
+pass more than there are fields to return, the remaining references are
+left untouched.
 
  $csv->bind_columns (\$code, \$name, \$price, \$description);
  while ($csv->getline ($io)) {
@@ -1686,13 +1731,6 @@ specify which fields are quoted in the L</combine>/L</string> combination.
  $csv->meta_info (0, 1, 1, 3, 0, 0);
  $csv->is_quoted (3, 1);
 
-=item combined methods
-
-Requests for adding means (methods) that combine L</combine> and L</string>
-in a single call will B<not> be honored. Likewise for L</parse> and
-L</fields>. Given the trouble with embedded newlines, Using L</getline> and
-L</print> instead is the preferred way to go.
-
 =item Parse the whole file at once
 
 Implement new methods that enable parsing of a complete file at once,
@@ -1714,22 +1752,24 @@ Returning something like
 Note that L</getline_all> already returns all rows for an open stream, but
 this will not return flags.
 
-=item EBCDIC
+=back
 
-The hard-coding of characters and character ranges makes this module
-unusable on EBCDIC system. Using some #ifdef structure could enable these
-again without loosing speed. Testing would be the hard part.
+=head2 NOT TODO
 
-Opening EBCDIC encode files on ASCII+ systems is likely to succeed using
-Encode's cp37, cp1047, or posix-bc:
+=over 2
 
- open my $fh, "<:encoding(cp1047)", "ebcdic_file.csv" or die "...";
+=item combined methods
+
+Requests for adding means (methods) that combine L</combine> and L</string>
+in a single call will B<not> be honored. Likewise for L</parse> and
+L</fields>. Given the trouble with embedded newlines, using L</getline> and
+L</print> instead is the preferred way to go.
 
 =back
 
 =head2 Release plan
 
-No guarantees, but this is what I have in mind right now:
+No guarantees, but this is what I had in mind a while ago:
 
 =over 2
 
@@ -1742,9 +1782,18 @@ No guarantees, but this is what I have in mind right now:
 =item next + 1
 
  - csv2csv - a script to regenerate a CSV file to follow standards
- - EBCDIC support
 
 =back
+
+=head1 EBCDIC
+
+The hard-coding of characters and character ranges makes this module
+unusable on EBCDIC systems.
+
+Opening EBCDIC encoded files on ASCII+ systems is likely to succeed
+using Encode's cp37, cp1047, or posix-bc:
+
+ open my $fh, "<:encoding(cp1047)", "ebcdic_file.csv" or die "...";
 
 =head1 DIAGNOSTICS
 
@@ -1973,6 +2022,14 @@ X<3007>
 3008 "EHR - unexpected error in bound fields"
 X<3008>
 
+=item *
+3009 "EHR - print_hr () called before column_names ()"
+X<3009>
+
+=item *
+3010 "EHR - print_hr () called with invalid arguments"
+X<3010>
+
 =back
 
 =head1 SEE ALSO
@@ -1999,9 +2056,9 @@ ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
- Copyright (C) 2007-2012 H.Merijn Brand for PROCURA B.V. All rights reserved.
+ Copyright (C) 2007-2013 H.Merijn Brand.  All rights reserved.
  Copyright (C) 1998-2001 Jochen Wiedmann. All rights reserved.
- Portions Copyright (C) 1997 Alan Citterman. All rights reserved.
+ Copyright (C) 1997      Alan Citterman.  All rights reserved.
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

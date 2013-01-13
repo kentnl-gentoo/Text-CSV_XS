@@ -14,7 +14,7 @@
       "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec"
       },
    "generated_by" : "Author",
-   "version" : "0.94",
+   "version" : "0.95",
    "name" : "Text-CSV_XS",
    "author" : [
       "H.Merijn Brand <h.m.brand@xs4all.nl>"
@@ -58,7 +58,7 @@
       },
    "provides" : {
       "Text::CSV_XS" : {
-         "version" : "0.94",
+         "version" : "0.95",
          "file" : "CSV_XS.pm"
          }
       },
