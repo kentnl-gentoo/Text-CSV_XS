@@ -1,7 +1,6 @@
 ChangeLog		Change history
 README			Docs
 MANIFEST		This file
-META.yml		Module meta-data
 CSV_XS.pm		Perl part of the module
 CSV_XS.xs		C part of the module
 Makefile.PL		Makefile generator
@@ -38,4 +37,5 @@ examples/parser-xs.pl	Parse CSV stream, be forgiving on bad lines
 examples/speed.pl	Small benchmark script
 files/macosx.csv	A CSV files exported on MacOSX
 files/utf8.csv		A UTF-8 encode test file
+META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
