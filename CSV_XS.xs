@@ -27,7 +27,7 @@
 
 #define MAINT_DEBUG	0
 
-#define BUFFER_SIZE	65536
+#define BUFFER_SIZE	1024
 
 #define CSV_XS_TYPE_PV	0
 #define CSV_XS_TYPE_IV	1
@@ -59,6 +59,7 @@
 #define CACHE_ID__has_ahead		30
 #define CACHE_ID_quote_null		31
 #define CACHE_ID_quote_binary		32
+#define CACHE_ID_diag_verbose		33
 
 #define CSV_FLAGS_QUO	0x0001
 #define CSV_FLAGS_BIN	0x0002
@@ -113,6 +114,8 @@ typedef struct {
     byte	quote_binary;
     byte	first_safe_char;
 
+    byte	diag_verbose;
+
     long	is_bound;
 
     byte *	cache;
@@ -140,6 +143,9 @@ typedef struct {
 #define bool_opt_def(o,d) \
     (((svp = hv_fetchs (self, o, FALSE)) && *svp) ? SvTRUE (*svp) : d)
 #define bool_opt(o) bool_opt_def (o, 0)
+#define num_opt_def(o,d) \
+    (((svp = hv_fetchs (self, o, FALSE)) && *svp) ? SvIV   (*svp) : d)
+#define num_opt(o) bool_opt_def (o, 0)
 
 typedef struct {
     int   xs_errno;
@@ -240,10 +246,10 @@ static SV *cx_SetDiag (pTHX_ csv_t *csv, int xse)
     SV *err = SvDiag (xse);
 
     if (err)
-	(void)hv_store (csv->self, "_ERROR_DIAG",  11, err,           0);
+	(void)hv_store (csv->self, "_ERROR_DIAG",  11, err,          0);
     if (xse == 0) {
-	(void)hv_store (csv->self, "_ERROR_POS",   10, newSViv  (0),  0);
-	(void)hv_store (csv->self, "_ERROR_INPUT", 12, newSVpvs (""), 0);
+	(void)hv_store (csv->self, "_ERROR_POS",   10, newSViv  (0), 0);
+	(void)hv_store (csv->self, "_ERROR_INPUT", 12, NULL,         0);
 	}
     if (err && csv->pself && csv->auto_diag) {
 	ENTER;
@@ -291,7 +297,8 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
          idx == CACHE_ID_blank_is_undef		||
 	 idx == CACHE_ID_empty_is_undef		||
 	 idx == CACHE_ID_verbatim		||
-	 idx == CACHE_ID_auto_diag) {
+	 idx == CACHE_ID_auto_diag		||
+	 idx == CACHE_ID_diag_verbose) {
 	cp[idx] = (byte)SvIV (val);
 	return;
 	}
@@ -362,6 +369,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     _cache_show_byte ("quote_null",		CACHE_ID_quote_null);
     _cache_show_byte ("quote_binary",		CACHE_ID_quote_binary);
     _cache_show_byte ("auto_diag",		CACHE_ID_auto_diag);
+    _cache_show_byte ("diag_verbose",		CACHE_ID_diag_verbose);
     _cache_show_byte ("blank_is_undef",		CACHE_ID_blank_is_undef);
     _cache_show_byte ("empty_is_undef",		CACHE_ID_empty_is_undef);
     _cache_show_byte ("has_ahead",		CACHE_ID__has_ahead);
@@ -420,7 +428,8 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 
 	csv->keep_meta_info		= csv->cache[CACHE_ID_keep_meta_info	];
 	csv->always_quote		= csv->cache[CACHE_ID_always_quote	];
-	csv->auto_diag			= csv->cache[CACHE_ID_auto_diag	];
+	csv->auto_diag			= csv->cache[CACHE_ID_auto_diag		];
+	csv->diag_verbose		= csv->cache[CACHE_ID_diag_verbose	];
 	csv->quote_space		= csv->cache[CACHE_ID_quote_space	];
 	csv->quote_null			= csv->cache[CACHE_ID_quote_null	];
 	csv->quote_binary		= csv->cache[CACHE_ID_quote_binary	];
@@ -523,7 +532,9 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->blank_is_undef		= bool_opt ("blank_is_undef");
 	csv->empty_is_undef		= bool_opt ("empty_is_undef");
 	csv->verbatim			= bool_opt ("verbatim");
-	csv->auto_diag			= bool_opt ("auto_diag");
+
+	csv->auto_diag			= num_opt ("auto_diag");
+	csv->diag_verbose		= num_opt ("diag_verbose");
 
 	sv_cache = newSVpvn (init_cache, CACHE_SIZE);
 	csv->cache = (byte *)SvPVX (sv_cache);
@@ -548,6 +559,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->cache[CACHE_ID_empty_is_undef]		= csv->empty_is_undef;
 	csv->cache[CACHE_ID_verbatim]			= csv->verbatim;
 	csv->cache[CACHE_ID_auto_diag]			= csv->auto_diag;
+	csv->cache[CACHE_ID_diag_verbose]		= csv->diag_verbose;
 	csv->cache[CACHE_ID_eol_is_cr]			= csv->eol_is_cr;
 	csv->cache[CACHE_ID_eol_len]			= csv->eol_len;
 	if (csv->eol_len > 0 && csv->eol_len < 8 && csv->eol)
@@ -1440,7 +1452,7 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 	csv.utf8 = SvUTF8 (src);
 	csv.bptr = SvPV (src, csv.size);
 	}
-    (void)hv_delete (hv, "_ERROR_INPUT", 12, G_DISCARD);
+    (void)hv_store (hv, "_ERROR_INPUT", 12, NULL, 0);
 
     result = Parse (&csv, src, av, avf);
     sv_inc (*(hv_fetchs (hv, "_RECNO", FALSE)));
@@ -1449,7 +1461,6 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
     if (csv.useIO) {
 	if (csv.tmp && csv.used < csv.size && csv.has_ahead) {
 	    SV *sv = newSVpvn (csv.bptr + csv.used, csv.size - csv.used);
-	    (void)hv_delete (hv, "_AHEAD", 6, G_DISCARD);
 	    (void)hv_store  (hv, "_AHEAD", 6, sv, 0);
 	    }
 	else {
@@ -1461,7 +1472,6 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 
 	if (avf) {
 	    if (csv.keep_meta_info) {
-		(void)hv_delete (hv, "_FFLAGS", 7, G_DISCARD);
 		(void)hv_store  (hv, "_FFLAGS", 7, newRV_noinc ((SV *)avf), 0);
 		}
 	    else {

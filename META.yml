@@ -16,7 +16,7 @@ name: Text-CSV_XS
 provides: 
   Text::CSV_XS: 
     file: CSV_XS.pm
-    version: '0.96'
+    version: '0.97'
 recommends: 
   Encode: '2.49'
   perl: '5.016003'
@@ -33,4 +33,4 @@ runtime:
   requires: 
     Test::More: 0
     Tie::Scalar: 0
-version: '0.96'
+version: '0.97'
