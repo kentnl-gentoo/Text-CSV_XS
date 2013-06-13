@@ -27,7 +27,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA );
-$VERSION = "0.99";
+$VERSION = "1.00";
 @ISA     = qw( DynaLoader );
 bootstrap Text::CSV_XS $VERSION;
 
@@ -672,12 +672,12 @@ user-specified characters for delimiters, separators, and escapes.
 
 =head2 Embedded newlines
 
-B<Important Note>: The default behavior is to accept only ASCII characters.
-This means that fields can not contain newlines. If your data contains
-newlines embedded in fields, or characters above 0x7e (tilde), or binary
-data, you B<I<must>> set C<< binary => 1 >> in the call to L</new>. To
-cover the widest range of parsing options, you will always want to set
-binary.
+B<Important Note>: The default behavior is to accept only ASCII characters
+in the range from C<0x20> (space) to C<0x7E> (tilde).  This means that
+fields can not contain newlines. If your data contains newlines embedded
+in fields, or characters above 0x7e (tilde), or binary data, you
+B<I<must>> set C<< binary => 1 >> in the call to L</new>. To cover the
+widest range of parsing options, you will always want to set binary.
 
 But you still have the problem that you have to pass a correct line to the
 L</parse> method, which is more complicated from the usual point of usage:
@@ -702,6 +702,8 @@ The old(er) way of using global file handles is still supported
  while (my $row = $csv->getline (*ARGV)) {
 
 =head2 Unicode
+
+Unicode is only tested to work with perl-5.8.2 and up.
 
 On parsing (both for L</getline> and L</parse>), if the source is marked
 being UTF8, then all fields that are marked binary will also be marked

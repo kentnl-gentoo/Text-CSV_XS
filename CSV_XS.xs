@@ -7,23 +7,18 @@
 #include <EXTERN.h>
 #include <perl.h>
 #include <XSUB.h>
-#define NEED_PL_parser
 #define DPPP_PL_parser_NO_DUMMY
-#define NEED_load_module
 #define NEED_my_snprintf
-#define NEED_newRV_noinc
 #define NEED_pv_escape
 #define	NEED_pv_pretty
-#define NEED_sv_2pv_flags
-#define NEED_vload_module
-#include "ppport.h"
-#define is_utf8_sv(s) is_utf8_string ((U8 *)SvPV_nolen (s), 0)
 #ifndef PERLIO_F_UTF8
 #  define PERLIO_F_UTF8	0x00008000
 #  endif
 #ifndef MAXINT
 #  define MAXINT ((int)(~(unsigned)0 >> 1))
 #  endif
+#include "ppport.h"
+#define is_utf8_sv(s) is_utf8_string ((U8 *)SvPV_nolen (s), SvCUR (s))
 
 #define MAINT_DEBUG	0
 
@@ -641,7 +636,7 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	sv_catpvn (SvRV (dst), csv->buffer, csv->used);
 	result = TRUE;
 	}
-    if (csv->utf8 && SvROK (dst) && is_utf8_sv (SvRV (dst)))
+    if (csv->utf8 && !csv->useIO && SvROK (dst) && is_utf8_sv (SvRV (dst)))
 	SvUTF8_on (SvRV (dst));
     csv->used = keep;
     return result;
