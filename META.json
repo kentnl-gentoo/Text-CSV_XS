@@ -1,34 +1,36 @@
 {
+   "license" : [
+      "perl_5"
+      ],
+   "abstract" : "Comma-Separated Values manipulation routines",
+   "meta-spec" : {
+      "version" : "2",
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec"
+      },
+   "release_status" : "stable",
+   "resources" : {
+      "license" : [
+         "http://dev.perl.org/licenses/"
+         ],
+      "repository" : {
+         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
+         "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
+         "type" : "git"
+         }
+      },
+   "name" : "Text-CSV_XS",
+   "version" : "1.01",
    "provides" : {
       "Text::CSV_XS" : {
-         "version" : "1.00",
+         "version" : "1.01",
          "file" : "CSV_XS.pm"
          }
       },
-   "abstract" : "Comma-Separated Values manipulation routines",
-   "meta-spec" : {
-      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
-      "version" : "2"
-      },
-   "dynamic_config" : 1,
-   "version" : "1.00",
    "author" : [
       "H.Merijn Brand <h.m.brand@xs4all.nl>"
       ],
-   "release_status" : "stable",
-   "generated_by" : "Author",
+   "dynamic_config" : 1,
    "prereqs" : {
-      "test" : {
-         "requires" : {
-            "Test::More" : "0",
-            "Tie::Scalar" : "0"
-            }
-         },
-      "configure" : {
-         "requires" : {
-            "ExtUtils::MakeMaker" : "0"
-            }
-         },
       "runtime" : {
          "requires" : {
             "IO::Handle" : "0",
@@ -40,24 +42,22 @@
             "perl" : "5.016003"
             }
          },
+      "configure" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "0"
+            }
+         },
       "build" : {
          "requires" : {
             "Config" : "0"
             }
+         },
+      "test" : {
+         "requires" : {
+            "Test::More" : "0",
+            "Tie::Scalar" : "0"
+            }
          }
       },
-   "resources" : {
-      "license" : [
-         "http://dev.perl.org/licenses/"
-         ],
-      "repository" : {
-         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
-         "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
-         "type" : "git"
-         }
-      },
-   "license" : [
-      "perl_5"
-      ],
-   "name" : "Text-CSV_XS"
+   "generated_by" : "Author"
    }

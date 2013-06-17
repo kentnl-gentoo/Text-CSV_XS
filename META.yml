@@ -16,7 +16,7 @@ name: Text-CSV_XS
 provides: 
   Text::CSV_XS: 
     file: CSV_XS.pm
-    version: '1.00'
+    version: '1.01'
 recommends: 
   Encode: '2.51'
   perl: '5.016003'
@@ -29,4 +29,4 @@ requires:
 resources: 
   license: http://dev.perl.org/licenses/
   repository: http://repo.or.cz/r/Text-CSV_XS.git
-version: '1.00'
+version: '1.01'
