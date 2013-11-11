@@ -55,6 +55,8 @@
 #define CACHE_ID_quote_null		31
 #define CACHE_ID_quote_binary		32
 #define CACHE_ID_diag_verbose		33
+#define CACHE_ID_has_error_input	34
+#define CACHE_ID_decode_utf8		35
 
 #define CSV_FLAGS_QUO	0x0001
 #define CSV_FLAGS_BIN	0x0002
@@ -110,6 +112,8 @@ typedef struct {
     byte	first_safe_char;
 
     byte	diag_verbose;
+    byte	has_error_input;
+    byte	decode_utf8;
 
     long	is_bound;
 
@@ -244,7 +248,8 @@ static SV *cx_SetDiag (pTHX_ csv_t *csv, int xse)
 	(void)hv_store (csv->self, "_ERROR_DIAG",  11, err,          0);
     if (xse == 0) {
 	(void)hv_store (csv->self, "_ERROR_POS",   10, newSViv  (0), 0);
-	(void)hv_store (csv->self, "_ERROR_INPUT", 12, NULL,         0);
+	(void)hv_store (csv->self, "_ERROR_INPUT", 12, &PL_sv_undef, 0);
+	csv->has_error_input = 0;
 	}
     if (err && csv->pself && csv->auto_diag) {
 	ENTER;
@@ -285,6 +290,7 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
          idx == CACHE_ID_quote_space		||
          idx == CACHE_ID_quote_null		||
          idx == CACHE_ID_quote_binary		||
+	 idx == CACHE_ID_decode_utf8		||
          idx == CACHE_ID_allow_loose_escapes	||
          idx == CACHE_ID_allow_loose_quotes	||
          idx == CACHE_ID_allow_unquoted_escape	||
@@ -293,7 +299,8 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 	 idx == CACHE_ID_empty_is_undef		||
 	 idx == CACHE_ID_verbatim		||
 	 idx == CACHE_ID_auto_diag		||
-	 idx == CACHE_ID_diag_verbose) {
+	 idx == CACHE_ID_diag_verbose		||
+	 idx == CACHE_ID_has_error_input) {
 	cp[idx] = (byte)SvIV (val);
 	return;
 	}
@@ -354,6 +361,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     _cache_show_char ("escape",			CACHE_ID_escape_char);
     _cache_show_char ("sep",			CACHE_ID_sep_char);
     _cache_show_byte ("binary",			CACHE_ID_binary);
+    _cache_show_byte ("decode_utf8",		CACHE_ID_decode_utf8);
 
     _cache_show_byte ("allow_loose_escapes",	CACHE_ID_allow_loose_escapes);
     _cache_show_byte ("allow_loose_quotes",	CACHE_ID_allow_loose_quotes);
@@ -365,6 +373,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     _cache_show_byte ("quote_binary",		CACHE_ID_quote_binary);
     _cache_show_byte ("auto_diag",		CACHE_ID_auto_diag);
     _cache_show_byte ("diag_verbose",		CACHE_ID_diag_verbose);
+    _cache_show_byte ("has_error_input",	CACHE_ID_has_error_input);
     _cache_show_byte ("blank_is_undef",		CACHE_ID_blank_is_undef);
     _cache_show_byte ("empty_is_undef",		CACHE_ID_empty_is_undef);
     _cache_show_byte ("has_ahead",		CACHE_ID__has_ahead);
@@ -420,11 +429,13 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->escape_char		= csv->cache[CACHE_ID_escape_char	];
 	csv->sep_char			= csv->cache[CACHE_ID_sep_char		];
 	csv->binary			= csv->cache[CACHE_ID_binary		];
+	csv->decode_utf8		= csv->cache[CACHE_ID_decode_utf8	];
 
 	csv->keep_meta_info		= csv->cache[CACHE_ID_keep_meta_info	];
 	csv->always_quote		= csv->cache[CACHE_ID_always_quote	];
 	csv->auto_diag			= csv->cache[CACHE_ID_auto_diag		];
 	csv->diag_verbose		= csv->cache[CACHE_ID_diag_verbose	];
+	csv->has_error_input		= csv->cache[CACHE_ID_has_error_input	];
 	csv->quote_space		= csv->cache[CACHE_ID_quote_space	];
 	csv->quote_null			= csv->cache[CACHE_ID_quote_null	];
 	csv->quote_binary		= csv->cache[CACHE_ID_quote_binary	];
@@ -515,6 +526,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    csv->is_bound = SvIV(*svp);
 
 	csv->binary			= bool_opt ("binary");
+	csv->decode_utf8		= bool_opt ("decode_utf8");
 	csv->keep_meta_info		= bool_opt ("keep_meta_info");
 	csv->always_quote		= bool_opt ("always_quote");
 	csv->quote_space		= bool_opt_def ("quote_space",  1);
@@ -530,6 +542,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 
 	csv->auto_diag			= num_opt ("auto_diag");
 	csv->diag_verbose		= num_opt ("diag_verbose");
+	csv->has_error_input		= 0;
 
 	sv_cache = newSVpvn (init_cache, CACHE_SIZE);
 	csv->cache = (byte *)SvPVX (sv_cache);
@@ -539,6 +552,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->cache[CACHE_ID_escape_char]		= csv->escape_char;
 	csv->cache[CACHE_ID_sep_char]			= csv->sep_char;
 	csv->cache[CACHE_ID_binary]			= csv->binary;
+	csv->cache[CACHE_ID_decode_utf8]		= csv->decode_utf8;
 
 	csv->cache[CACHE_ID_keep_meta_info]		= csv->keep_meta_info;
 	csv->cache[CACHE_ID_always_quote]		= csv->always_quote;
@@ -636,7 +650,8 @@ static int cx_Print (pTHX_ csv_t *csv, SV *dst)
 	sv_catpvn (SvRV (dst), csv->buffer, csv->used);
 	result = TRUE;
 	}
-    if (csv->utf8 && !csv->useIO && SvROK (dst) && is_utf8_sv (SvRV (dst)))
+    if (csv->utf8 && !csv->useIO && csv->decode_utf8
+		  && SvROK (dst) && is_utf8_sv (SvRV (dst)))
 	SvUTF8_on (SvRV (dst));
     csv->used = keep;
     return result;
@@ -757,8 +772,9 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 
 		if (!csv->binary && is_csv_binary (c)) {
 		    SvREFCNT_inc (sv);
+		    csv->has_error_input = 1;
 		    unless (hv_store (csv->self, "_ERROR_INPUT", 12, sv, 0))
-/* uncovered */	    SvREFCNT_dec (sv);
+/* uncovered */		SvREFCNT_dec (sv);
 		    (void)SetDiag (csv, 2110);
 		    return FALSE;
 		    }
@@ -797,6 +813,7 @@ static void cx_ParseError (pTHX_ csv_t *csv, int xse, int pos)
 {
     (void)hv_store (csv->self, "_ERROR_POS", 10, newSViv (pos), 0);
     if (csv->tmp) {
+	csv->has_error_input = 1;
 	if (hv_store (csv->self, "_ERROR_INPUT", 12, csv->tmp, 0))
 	    SvREFCNT_inc (csv->tmp);
 	}
@@ -942,7 +959,8 @@ int CSV_GET_ (csv_t *csv, SV *src, int l)
     else {								\
 	if (csv->allow_whitespace && ! (f & CSV_FLAGS_QUO))		\
 	    strip_trail_whitespace (sv);				\
-	if (f & CSV_FLAGS_BIN && (csv->utf8 || is_utf8_sv (sv)))	\
+	if (f & CSV_FLAGS_BIN && csv->decode_utf8			\
+			      && (csv->utf8 || is_utf8_sv (sv)))	\
 	    SvUTF8_on (sv);						\
 	}								\
     SvSETMAGIC (sv);							\
@@ -1449,7 +1467,10 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 	csv.utf8 = SvUTF8 (src);
 	csv.bptr = SvPV (src, csv.size);
 	}
-    (void)hv_store (hv, "_ERROR_INPUT", 12, NULL, 0);
+    if (csv.has_error_input) {
+	(void)hv_store (hv, "_ERROR_INPUT", 12, &PL_sv_undef, 0);
+	csv.has_error_input = 0;
+	}
 
     result = Parse (&csv, src, av, avf);
     sv_inc (*(hv_fetchs (hv, "_RECNO", FALSE)));
@@ -1646,7 +1667,7 @@ error_input (self)
     if (self && SvOK (self) && SvROK (self) && SvTYPE (SvRV (self)) == SVt_PVHV) {
 	HV  *hv = (HV *)SvRV (self);
 	SV **sv = hv_fetchs (hv, "_ERROR_INPUT", FALSE);
-	if (sv && *sv && SvOK (*sv))
+	if (SvOK (*sv))
 	    ST (0) = *sv;
 	else
 	    ST (0) = newSV (0);
