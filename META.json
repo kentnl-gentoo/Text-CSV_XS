@@ -1,63 +1,63 @@
 {
-   "release_status" : "stable",
-   "meta-spec" : {
-      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
-      "version" : "2"
-   },
-   "license" : [
-      "perl_5"
-   ],
-   "name" : "Text-CSV_XS",
    "prereqs" : {
-      "test" : {
-         "requires" : {
-            "Tie::Scalar" : "0",
-            "Test::More" : "0"
-         }
-      },
-      "runtime" : {
-         "requires" : {
-            "DynaLoader" : "0",
-            "perl" : "5.006001",
-            "IO::Handle" : "0"
-         },
-         "recommends" : {
-            "Encode" : "2.55",
-            "perl" : "5.018001"
-         }
-      },
       "configure" : {
          "requires" : {
             "ExtUtils::MakeMaker" : "0"
+         }
+      },
+      "test" : {
+         "requires" : {
+            "Test::More" : "0",
+            "Tie::Scalar" : "0"
          }
       },
       "build" : {
          "requires" : {
             "Config" : "0"
          }
+      },
+      "runtime" : {
+         "recommends" : {
+            "Encode" : "2.56",
+            "perl" : "5.018001"
+         },
+         "requires" : {
+            "IO::Handle" : "0",
+            "DynaLoader" : "0",
+            "perl" : "5.006001"
+         }
       }
    },
+   "license" : [
+      "perl_5"
+   ],
+   "abstract" : "Comma-Separated Values manipulation routines",
+   "name" : "Text-CSV_XS",
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : "2"
+   },
+   "resources" : {
+      "repository" : {
+         "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
+         "type" : "git",
+         "url" : "http://repo.or.cz/r/Text-CSV_XS.git"
+      },
+      "license" : [
+         "http://dev.perl.org/licenses/"
+      ]
+   },
+   "release_status" : "stable",
+   "version" : "1.03",
    "generated_by" : "Author",
-   "version" : "1.02",
+   "provides" : {
+      "Text::CSV_XS" : {
+         "file" : "CSV_XS.pm",
+         "version" : "1.03"
+      }
+   },
    "dynamic_config" : 1,
    "author" : [
       "H.Merijn Brand <h.m.brand@xs4all.nl>"
-   ],
-   "abstract" : "Comma-Separated Values manipulation routines",
-   "provides" : {
-      "Text::CSV_XS" : {
-         "version" : "1.02",
-         "file" : "CSV_XS.pm"
-      }
-   },
-   "resources" : {
-      "license" : [
-         "http://dev.perl.org/licenses/"
-      ],
-      "repository" : {
-         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
-         "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
-         "type" : "git"
-      }
-   }
+   ]
 }

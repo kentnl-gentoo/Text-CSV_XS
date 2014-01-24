@@ -1,4 +1,4 @@
-/*  Copyright (c) 2007-2013 H.Merijn Brand.  All rights reserved.
+/*  Copyright (c) 2007-2014 H.Merijn Brand.  All rights reserved.
  *  Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
  *  This program is free software; you can redistribute it and/or
  *  modify it under the same terms as Perl itself.
@@ -162,6 +162,7 @@ xs_error_t xs_errors[] =  {
     { 2010, "ECR - QUO char inside quotes followed by CR not part of EOL"	},
     { 2011, "ECR - Characters after end of quoted field"			},
     { 2012, "EOF - End of data in parsing input stream"				},
+    { 2013, "ESP - Specification error for fragments RFC7111"			},
 
     /*  EIQ - Error Inside Quotes */
     { 2021, "EIQ - NL char inside quotes, binary off"				},
