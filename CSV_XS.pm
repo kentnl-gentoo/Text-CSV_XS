@@ -23,12 +23,14 @@ require 5.006001;
 use strict;
 use warnings;
 
+require Exporter;
 use DynaLoader ();
 use Carp;
 
-use vars   qw( $VERSION @ISA );
-$VERSION = "1.03";
-@ISA     = qw( DynaLoader );
+use vars   qw( $VERSION @ISA @EXPORT_OK );
+$VERSION   = "1.04";
+@ISA       = qw( DynaLoader Exporter );
+@EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
 
 sub PV { 0 }
@@ -377,6 +379,25 @@ sub eof
     return $self->{_EOF};
     } # status
 
+sub types
+{
+    my $self = shift;
+    if (@_) {
+	if (my $types = shift) {
+	    $self->{_types} = join "", map { chr $_ } @{$types};
+	    $self->{types}  = $types;
+	    }
+	else {
+	    delete $self->{types};
+	    delete $self->{_types};
+	    undef;
+	    }
+	}
+    else {
+	$self->{types};
+	}
+    } # types
+
 # erro_diag
 #
 #   If (and only if) an error occurred, this function returns a code that
@@ -556,7 +577,7 @@ sub column_names
 {
     my ($self, @keys) = @_;
     @keys or
-	return defined $self->{_COLUMN_NAMES} ? @{$self->{_COLUMN_NAMES}} : undef;
+	return defined $self->{_COLUMN_NAMES} ? @{$self->{_COLUMN_NAMES}} : ();
 
     @keys == 1 && ! defined $keys[0] and
 	return $self->{_COLUMN_NAMES} = undef;
@@ -637,8 +658,10 @@ sub fragment
 	( row | col | cell ) \s* =
 	( $qc				# for row and col
 	| $qd , $qd (?: - $qd , $qd)?	# for cell
-	) \s* $}xi or croak ($self->SetDiag (2014));
+	) \s* $}xi or croak ($self->SetDiag (2013));
     my ($type, $range) = (lc $1, $2);
+
+    my @h = $self->column_names ();
 
     my @c;
     if ($type eq "cell") {
@@ -648,16 +671,20 @@ sub fragment
 	    \s* (?: - \s*
 		([0-9]+) \s* , \s* ([0-9]+)
 		)?
-	    \s* $}x) or croak ($self->SetDiag (2014));
+	    \s* $}x) or croak ($self->SetDiag (2013));
 	defined $brr or ($brr, $brc) = ($tlr, $tlc);
 	$tlr <= 0 || $tlc <= 0 || $brr <= 0 || $brc <= 0 ||
-	    $brr < $tlr || $brc < $tlc and croak ($self->SetDiag (2014));
+	    $brr < $tlr || $brc < $tlc and croak ($self->SetDiag (2013));
 	$_-- for $tlc, $brc;
 	my $r = 0;
 	while (my $row = $self->getline ($io)) {
 	    ++$r <  $tlr and next;
 	    push @c, [ @{$row}[$tlc..$brc] ];
-	      $r >= $brr and last;
+	    if (@h) {
+		my %h; @h{@h} = @{$c[-1]};
+		$c[-1] = \%h;
+		}
+	    $r >= $brr and last;
 	    }
 	return \@c;
 	}
@@ -667,10 +694,10 @@ sub fragment
     my $eod = 0;
     for (split m/\s*;\s*/ => $range) {
 	my ($from, $to) = m/^\s* ([0-9]+) (?: \s* - \s* ([0-9]+ | \* ))? \s* $/x
-	    or croak ($self->SetDiag (2014));
+	    or croak ($self->SetDiag (2013));
 	$to ||= $from;
 	$to eq "*" and ($to, $eod) = ($from, 1);
-	$from <= 0 || $to <= 0 || $to < $from and croak ($self->SetDiag (2014));
+	$from <= 0 || $to <= 0 || $to < $from and croak ($self->SetDiag (2013));
 	$r[$_] = 1 for $from .. $to;
 	}
 
@@ -680,33 +707,117 @@ sub fragment
     while (my $row = $self->getline ($io)) {
 	$r++;
 	if ($type eq "row") {
-	    ($r > $#r && $eod) || $r[$r] and push @c, $row;
+	    if (($r > $#r && $eod) || $r[$r]) {
+		push @c, $row;
+		if (@h) {
+		    my %h; @h{@h} = @{$c[-1]};
+		    $c[-1] = \%h;
+		    }
+		}
 	    next;
 	    }
 	push @c, [ map { ($_ > $#r && $eod) || $r[$_] ? $row->[$_] : () } 0..$#$row ];
+	if (@h) {
+	    my %h; @h{@h} = @{$c[-1]};
+	    $c[-1] = \%h;
+	    }
 	}
 
     return \@c;
     } # fragment
 
-sub types
+my $csv_usage = q{usage: my $aoa = csv (in => $file);};
+
+sub _csv_attr
 {
-    my $self = shift;
-    if (@_) {
-	if (my $types = shift) {
-	    $self->{_types} = join "", map { chr $_ } @{$types};
-	    $self->{types}  = $types;
+    my %attr = (@_ == 1 && ref $_[0] eq "HASH" ? %{$_[0]} : @_) or die;
+
+    $attr{binary} = 1;
+
+    my $enc = delete $attr{encoding} || "";
+
+    my $fh;
+    my $in  = delete $attr{in}  || delete $attr{file} or croak $csv_usage;
+    my $out = delete $attr{out} || delete $attr{file};
+    if (ref $in eq "ARRAY") {
+	# we need an out
+	$out or croak qq{for CSV source, "out" is required};
+	defined $attr{eol} or $attr{eol} = "\r\n";
+	if (ref $out or "GLOB" eq ref \$out) {
+	    $fh = $out;
 	    }
 	else {
-	    delete $self->{types};
-	    delete $self->{_types};
-	    undef;
+	    $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
+	    open $fh, ">$enc", $out or croak "$out: $!";
+	    }
+	}
+    elsif (ref $in or "GLOB" eq ref \$in) {
+	if (!ref $in && $] < 5.008005) {
+	    $fh = \*$in;
+	    }
+	else {
+	    $fh = $in;
 	    }
 	}
     else {
-	$self->{types};
+	$enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
+	open $fh, "<$enc", $in or croak "$in: $!";
 	}
-    } # types
+    $fh or croak qq{No valid source passed. "in" is required};
+
+    my $hdrs = delete $attr{headers};
+    my $frag = delete $attr{fragment};
+
+    defined $attr{auto_diag} or $attr{auto_diag} = 1;
+    my $csv = Text::CSV_XS->new (\%attr) or croak $last_new_err;
+
+    return {
+	csv  => $csv,
+	fh   => $fh,
+	in   => $in,
+	out  => $out,
+	hdrs => $hdrs,
+	frag => $frag,
+	};
+    } # _csv_attr
+
+sub csv
+{
+    # This is a function, not a method
+    @_ && ref $_[0] ne __PACKAGE__ or croak $csv_usage;
+
+    my $c = _csv_attr (@_);
+    my ($csv, $fh, $hdrs) = @{$c}{"csv", "fh", "hdrs"};
+
+    if ($c->{out}) {
+	if (ref $c->{in}[0] eq "ARRAY") { # aoa
+	    ref $hdrs and $csv->print ($fh, $hdrs);
+	    $csv->print ($fh, $_) for @{$c->{in}};
+	    }
+	else { # aoh
+	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$c->{in}[0]};
+	    defined $hdrs or $hdrs = "auto";
+	    ref $hdrs || $hdrs eq "auto" and $csv->print ($fh, \@hdrs);
+	    $csv->print ($fh, [ @{$_}{@hdrs} ]) for @{$c->{in}};
+	    }
+
+	return close $fh;
+	}
+
+    if (defined $hdrs && !ref $hdrs) {
+	$hdrs eq "skip" and         $csv->getline ($fh);
+	$hdrs eq "auto" and $hdrs = $csv->getline ($fh);
+	}
+
+    my $frag = $c->{frag};
+    # aoa
+    ref $hdrs or
+	return $frag ? $csv->fragment ($fh, $frag) : $csv->getline_all ($fh);
+
+    # aoh
+    $csv->column_names ($hdrs);
+    return $frag ? $csv->fragment ($fh, $frag) : $csv->getline_hr_all ($fh);
+    } # csv
 
 1;
 
@@ -718,6 +829,14 @@ Text::CSV_XS - comma-separated values manipulation routines
 
 =head1 SYNOPSIS
 
+ # Functional interface
+ use Text::CSV_XS qw( csv );
+ # Read whole file in memory as array of arrays
+ my $aoa = csv (in => "data.csv");
+ # Write array of arrays as csv file
+ csv (in => $aoa, out => "file.csv", sep_char=> ";");
+
+ # Object interface
  use Text::CSV_XS;
 
  my @rows;
@@ -895,7 +1014,7 @@ options to the object creator.
 
 =back
 
-=head1 FUNCTIONS
+=head1 METHODS
 
 =head2 version
 X<version>
@@ -1439,10 +1558,8 @@ It is just a wrapper method with basic parameter checks over
 
 =head2 fragment
 
-This, for now experimental, function tries to implement RFC7111 (URI
-Fragment Identifiers for the text/csv Media Type) 1)
-
- 1) http://tools.ietf.org/html/rfc7111
+This function tries to implement RFC7111 (URI Fragment Identifiers for the
+text/csv Media Type) - http://tools.ietf.org/html/rfc7111
 
  my $AoA = $csv->fragment ($io, $spec);
 
@@ -1450,6 +1567,12 @@ In specifications, C<*> is used to specify the I<last> item, a dash (C<->)
 to indicate a range. All indices are 1-based: the first row or column
 has index 1. Selections on row and column can be combined with the
 semi-colon (C<;>).
+
+When using this method in combination with L</column_names>, the returned
+reference will point to a list of hashes instead of to a list of lists.
+
+ $csv->column_names ("Name", "Age");
+ my $AoH = $csv->fragment ($io, "col=3;8");
 
 =over 2
 
@@ -1481,13 +1604,13 @@ cell location
 =back
 
 RFC7111 does not allow any combination of the three selection methods. Passing
-an invalid fragment specification will croak and set error 2014.
+an invalid fragment specification will croak and set error 2013.
 
 =head2 column_names
 X<column_names>
 
 Set the keys that will be used in the L</getline_hr> calls. If no keys
-(column names) are passed, it'll return the current setting.
+(column names) are passed, it'll return the current setting as a list.
 
 L</column_names> accepts a list of scalars (the column names) or a single
 array_ref, so you can pass L</getline>
@@ -1727,6 +1850,126 @@ X<SetDiag>
 
 Use to reset the diagnostics if you are dealing with errors.
 
+=head1 FUNCTIONS
+
+=head2 csv
+X<csv>
+
+This function is not exported by default and should be explicitly requested:
+
+ use Text::CSV_XS qw( csv );
+
+This is the first draft. This function will stay, but the arguments might
+change based on user feedback: esp. the C<headers> attribute is not complete.
+The basics will stay.
+
+This is an high-level function that aims at simple interfaces. It can be used
+to read/parse a CSV file or stream (the default behavior) or to produce a file
+or write to a stream (define the C<out> attribute). It returns an array
+reference on parsing (or undef on fail) or the numeric value of L</error_diag>
+on writing. When this function fails you can get to the error using the class
+call to L</error_diag>
+
+ my $aoa = csv (in => "test.csv") or
+     die Text::CSV_XS->error_diag;
+
+This function takes the arguments as key-value pairs. It can be passed as
+a list or as an anonymous hash:
+
+ my $aoa = csv (  in => "test.csv", sep_char => ";");
+ my $aoh = csv ({ in => $fh, headers => "auto" });
+
+The arguments passed consist of two parts: the arguments to L</csv> itself
+and the optional attributes to the CSV object used inside the function as
+enumerated and explained in L</new>.
+
+If not overridden, the default options used for CSV are
+
+ auto_diag => 1
+
+These options are always set and cannot be altered
+
+ binary    => 1
+
+=head3 in
+X<in>
+
+Used to specify the source.  C<in> can be a file name (e.g. C<"file.csv">),
+which will be opened for reading and closed when finished, a file handle (e.g.
+C<$fh> or C<FH>), a reference to a glob (e.g. C<\*ARGV>), or - when your
+version of perl is not archaic - the glob itself (e.g. C<*STDIN>).
+
+When used with L</out>, it should be a reference to a CSV structure (AoA or AoH).
+
+ my $aoa = csv (in => "file.csv");
+
+ open my $fh, "<", "file.csv";
+ my $aoa = csv (in => $fh);
+
+ my $csv = [ [qw( Foo Bar )], [ 1, 2 ], [ 2, 3 ]];
+ my $err = csv (in => $csv, out => "file.csv");
+
+=head3 out
+X<out>
+
+In output mode, the default CSV options when producing CSV are
+
+ eol       => "\r\n"
+
+The L</fragment> attribute is ignored in output mode.
+
+C<out> can be a file name (e.g. C<"file.csv">), which will be opened for
+writing and closed when finished, a file handle (e.g. C<$fh> or C<FH>), a
+reference to a glob (e.g. C<\*STDOUT>), or - when your version of perl is
+not archaic - the glob itself (e.g. C<*STDOUT>).
+
+=head3 encoding
+X<encoding>
+
+If passed, it should be an encoding accepted by the C<:encoding()> option
+to C<open>. There is no default value. This attribute does not work in
+perl 5.6.x.
+
+=head3 headers
+X<headers>
+
+If this attribute is not given, the default behavior is to produce an array
+of arrays.
+
+If C<headers> is given, it should be either an anonymous list of column names
+or a flag: C<auto> or C<skip>. When C<skip> is used, the header will not be
+included in the output.
+
+ my $aoa = csv (in => $fh, headers => "skip");
+
+If C<auto> is used, the first line of the CSV source will be read as the list
+of field headers and used to produce an array of hashes.
+
+ my $aoh = csv (in => $fh, headers => "auto");
+
+If C<headers> is an anonymous list, it will be used instead
+
+ my $aoh = csv (in => $fh, headers => [qw( Foo Bar )]);
+ csv (in => $aoa, out => $fh, headers => [qw( code description price }]);
+
+=head3 fragment
+X<fragment>
+
+Only output the fragment as defined in the L</fragment> method. This
+attribute is ignored when generating CSV. See L</out>.
+
+Combining all of them could give something like
+
+ use Text::CSV_XS qw( csv );
+ my $aoh = csv (
+     in       => "test.txt",
+     encoding => "utf-8",
+     headers  => "auto",
+     sep_char => "|",
+     fragment => "row=3;6-9;15-*",
+     );
+ say $aoh->[15]{Foo};
+
 =head1 INTERNALS
 
 =over 4
@@ -1760,6 +2003,11 @@ API may change in future releases.
  # get only the 4th column
  my @column = map { $_->[3] } @{$csv->getline_all ($fh)};
  close $fh or die "file.csv: $!";
+
+with L</csv>, you could do
+
+ my @column = map { $_->[0] }
+     @{csv (in => "file.csv", fragment => "col=4")};
 
 =head2 Parsing CSV strings:
 
@@ -1816,6 +2064,13 @@ or using the slower L</combine> and L</string> methods:
          $csv->error_input, "\n";
      }
  close $csv_fh or die "hello.csv: $!";
+
+=head2 Rewriting CSV
+
+Rewrite a CSV file with C<;> as separator character to well-formed CSV:
+
+ use Text::CSV_XS qw( csv );
+ csv (in => csv (in => "bad.csv", sep_char => ";"), out => *STDOUT);
 
 =head2 The examples folder
 
@@ -1948,12 +2203,8 @@ No guarantees, but this is what I had in mind some time ago:
 
 =item next
 
- - DIAGNOSTICS setction in pod to *describe* the errors (see below)
+ - DIAGNOSTICS secttion in pod to *describe* the errors (see below)
  - croak / carp
-
-=item next + 1
-
- - csv2csv - a script to regenerate a CSV file to follow standards
 
 =back
 
@@ -2079,7 +2330,7 @@ when reading from streams with L</getline>, as using L</parse> is done on
 strings that are not required to have a trailing C<eol>.
 
 =item *
-2013 "ESP - Specification error for fragments RFC7111"
+2013 "INI - Specification error for fragments RFC7111"
 X<2013>
 
 Invalid specification for URI L</fragment> specification.

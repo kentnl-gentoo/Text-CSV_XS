@@ -1,4 +1,7 @@
 {
+   "generated_by" : "Author",
+   "release_status" : "stable",
+   "dynamic_config" : 1,
    "prereqs" : {
       "configure" : {
          "requires" : {
@@ -7,8 +10,8 @@
       },
       "test" : {
          "requires" : {
-            "Test::More" : "0",
-            "Tie::Scalar" : "0"
+            "Tie::Scalar" : "0",
+            "Test::More" : "0"
          }
       },
       "build" : {
@@ -18,8 +21,8 @@
       },
       "runtime" : {
          "recommends" : {
-            "Encode" : "2.56",
-            "perl" : "5.018001"
+            "perl" : "5.018001",
+            "Encode" : "2.57"
          },
          "requires" : {
             "IO::Handle" : "0",
@@ -28,36 +31,33 @@
          }
       }
    },
+   "author" : [
+      "H.Merijn Brand <h.m.brand@xs4all.nl>"
+   ],
+   "version" : "1.04",
    "license" : [
       "perl_5"
    ],
-   "abstract" : "Comma-Separated Values manipulation routines",
-   "name" : "Text-CSV_XS",
+   "provides" : {
+      "Text::CSV_XS" : {
+         "file" : "CSV_XS.pm",
+         "version" : "1.04"
+      }
+   },
    "meta-spec" : {
-      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
-      "version" : "2"
+      "version" : "2",
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec"
    },
    "resources" : {
       "repository" : {
          "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
-         "type" : "git",
-         "url" : "http://repo.or.cz/r/Text-CSV_XS.git"
+         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
+         "type" : "git"
       },
       "license" : [
          "http://dev.perl.org/licenses/"
       ]
    },
-   "release_status" : "stable",
-   "version" : "1.03",
-   "generated_by" : "Author",
-   "provides" : {
-      "Text::CSV_XS" : {
-         "file" : "CSV_XS.pm",
-         "version" : "1.03"
-      }
-   },
-   "dynamic_config" : 1,
-   "author" : [
-      "H.Merijn Brand <h.m.brand@xs4all.nl>"
-   ]
+   "abstract" : "Comma-Separated Values manipulation routines",
+   "name" : "Text-CSV_XS"
 }
