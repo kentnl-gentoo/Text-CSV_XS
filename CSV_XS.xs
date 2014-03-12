@@ -57,11 +57,16 @@
 #define CACHE_ID_diag_verbose		33
 #define CACHE_ID_has_error_input	34
 #define CACHE_ID_decode_utf8		35
+#define CACHE_ID__has_hooks		36
 
-#define CSV_FLAGS_QUO	0x0001
-#define CSV_FLAGS_BIN	0x0002
-#define CSV_FLAGS_EIF	0x0004
-#define CSV_FLAGS_MIS	0x0010
+#define CSV_FLAGS_QUO		0x0001
+#define CSV_FLAGS_BIN		0x0002
+#define CSV_FLAGS_EIF		0x0004
+#define CSV_FLAGS_MIS		0x0010
+
+#define HOOK_ERROR		0x0001
+#define HOOK_AFTER_PARSE	0x0002
+#define HOOK_BEFORE_PRINT	0x0004
 
 #define CH_TAB		'\011'
 #define CH_NL		'\012'
@@ -77,6 +82,12 @@
 #define _is_arrayref(f) ( f && \
      (SvROK (f) || (SvRMAGICAL (f) && (mg_get (f), 1) && SvROK (f))) && \
       SvOK (f) && SvTYPE (SvRV (f)) == SVt_PVAV )
+#define _is_hashref(f) ( f && \
+     (SvROK (f) || (SvRMAGICAL (f) && (mg_get (f), 1) && SvROK (f))) && \
+      SvOK (f) && SvTYPE (SvRV (f)) == SVt_PVHV )
+#define _is_coderef(f) ( f && \
+     (SvROK (f) || (SvRMAGICAL (f) && (mg_get (f), 1) && SvROK (f))) && \
+      SvOK (f) && SvTYPE (SvRV (f)) == SVt_PVCV )
 
 #define CSV_XS_SELF					\
     if (!self || !SvOK (self) || !SvROK (self) ||	\
@@ -114,6 +125,7 @@ typedef struct {
     byte	diag_verbose;
     byte	has_error_input;
     byte	decode_utf8;
+    byte	has_hooks;
 
     long	is_bound;
 
@@ -157,6 +169,7 @@ xs_error_t xs_errors[] =  {
     { 1001, "INI - sep_char is equal to quote_char or escape_char"		},
     { 1002, "INI - allow_whitespace with escape_char or quote_char SP or TAB"	},
     { 1003, "INI - \r or \n in main attr not allowed"				},
+    { 1004, "INI - callbacks should be undef or a hashref"			},
 
     /* Parse errors */
     { 2010, "ECR - QUO char inside quotes followed by CR not part of EOL"	},
@@ -205,6 +218,7 @@ xs_error_t xs_errors[] =  {
 static char init_cache[CACHE_SIZE];
 static int  io_handle_loaded = 0;
 static SV  *m_getline, *m_print, *m_read;
+static int  last_error = 0;
 
 #define require_IO_Handle \
     unless (io_handle_loaded) {\
@@ -245,6 +259,7 @@ static SV *cx_SetDiag (pTHX_ csv_t *csv, int xse)
     dSP;
     SV *err = SvDiag (xse);
 
+    last_error = xse;
     if (err)
 	(void)hv_store (csv->self, "_ERROR_DIAG",  11, err,          0);
     if (xse == 0) {
@@ -301,6 +316,7 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 	 idx == CACHE_ID_verbatim		||
 	 idx == CACHE_ID_auto_diag		||
 	 idx == CACHE_ID_diag_verbose		||
+	 idx == CACHE_ID__has_hooks		||
 	 idx == CACHE_ID_has_error_input) {
 	cp[idx] = (byte)SvIV (val);
 	return;
@@ -382,6 +398,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     _cache_show_byte ("keep_meta_info",		CACHE_ID_keep_meta_info);
     _cache_show_byte ("verbatim",		CACHE_ID_verbatim);
 
+    _cache_show_byte ("has_hooks",		CACHE_ID__has_hooks);
     _cache_show_byte ("eol_is_cr",		CACHE_ID_eol_is_cr);
     _cache_show_byte ("eol_len",		CACHE_ID_eol_len);
     if (c < 8)
@@ -420,6 +437,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
     STRLEN	 len;
     char	*ptr;
 
+    last_error = 0;
     csv->self  = self;
     csv->pself = pself;
 
@@ -449,6 +467,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->empty_is_undef		= csv->cache[CACHE_ID_empty_is_undef	];
 	csv->verbatim			= csv->cache[CACHE_ID_verbatim		];
 	csv->has_ahead			= csv->cache[CACHE_ID__has_ahead	];
+	csv->has_hooks			= csv->cache[CACHE_ID__has_hooks	];
 	csv->eol_is_cr			= csv->cache[CACHE_ID_eol_is_cr		];
 	csv->eol_len			= csv->cache[CACHE_ID_eol_len		];
 	if (csv->eol_len < 8)
@@ -523,8 +542,16 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    }
 
 	csv->is_bound = 0;
-	if ((svp = hv_fetchs (self, "_is_bound", FALSE)) && *svp && SvOK(*svp))
+	if ((svp = hv_fetchs (self, "_is_bound", FALSE)) && *svp && SvOK (*svp))
 	    csv->is_bound = SvIV(*svp);
+	csv->has_hooks = 0;
+	if ((svp = hv_fetchs (self, "callbacks", FALSE)) && _is_hashref (*svp)) {
+	    HV *cb = (HV *)SvRV (*svp);
+	    if ((svp = hv_fetchs (cb, "after_parse",  FALSE)) && _is_coderef (*svp))
+		csv->has_hooks |= HOOK_AFTER_PARSE;
+	    if ((svp = hv_fetchs (cb, "before_print", FALSE)) && _is_coderef (*svp))
+		csv->has_hooks |= HOOK_BEFORE_PRINT;
+	    }
 
 	csv->binary			= bool_opt ("binary");
 	csv->decode_utf8		= bool_opt ("decode_utf8");
@@ -576,6 +603,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    memcpy ((char *)&csv->cache[CACHE_ID_eol], csv->eol, csv->eol_len);
 	csv->cache[CACHE_ID_has_types]			= csv->types ? 1 : 0;
 	csv->cache[CACHE_ID__has_ahead]			= csv->has_ahead = 0;
+	csv->cache[CACHE_ID__has_hooks]			= csv->has_hooks;
 	csv->cache[CACHE_ID__is_bound    ] = (csv->is_bound & 0xFF000000) >> 24;
 	csv->cache[CACHE_ID__is_bound + 1] = (csv->is_bound & 0x00FF0000) >> 16;
 	csv->cache[CACHE_ID__is_bound + 2] = (csv->is_bound & 0x0000FF00) >>  8;
@@ -1527,12 +1555,40 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
     return result;
     } /* c_xsParse */
 
+static void hook (pTHX_ HV *hv, char *cb_name, AV *av)
+{
+    SV **svp;
+    HV *cb;
+
+    unless ((svp = hv_fetchs (hv, "callbacks", FALSE)) && _is_hashref (*svp))
+	return;
+
+    cb = (HV *)SvRV (*svp);
+    unless ((svp = hv_fetch (cb, cb_name, strlen (cb_name), FALSE)) && _is_coderef (*svp))
+	return;
+
+    {   dSP;
+	ENTER;
+	SAVETMPS;
+	PUSHMARK (SP);
+	XPUSHs (newRV_noinc ((SV *)hv));
+	XPUSHs (newRV_noinc ((SV *)av));
+	PUTBACK;
+	call_sv (*svp, G_VOID | G_DISCARD);
+	FREETMPS;
+	LEAVE;
+	}
+    } /* hook */
+
 #define xsParse(self,hv,av,avf,src,useIO)	cx_xsParse (aTHX_ self, hv, av, avf, src, useIO)
 static int cx_xsParse (pTHX_ SV *self, HV *hv, AV *av, AV *avf, SV *src, bool useIO)
 {
     csv_t	csv;
     SetupCsv (&csv, hv, self);
-    return (c_xsParse (csv, hv, av, avf, src, useIO));
+    int state = c_xsParse (csv, hv, av, avf, src, useIO);
+    if (state && csv.has_hooks & HOOK_AFTER_PARSE)
+	hook (aTHX_ hv, "after_parse", av);
+    return (state || !last_error);
     } /* xsParse */
 
 #define av_empty(av)	cx_av_empty (aTHX_ av)
@@ -1585,6 +1641,8 @@ static SV *cx_xsParse_all (pTHX_ SV *self, HV *hv, SV *io, SV *off, SV *len)
 	    n--;
 	    }
 
+	if (csv.has_hooks & HOOK_AFTER_PARSE)
+	    hook (aTHX_ hv, "after_parse", row);
 	av_push (avr, newRV_noinc ((SV *)row));
 
 	if (n >= length && skip >= 0)
@@ -1615,6 +1673,8 @@ static int cx_xsCombine (pTHX_ SV *self, HV *hv, AV *av, SV *io, bool useIO)
     if (csv.eol && *csv.eol)
 	PL_ors_sv = NULL;
 #endif
+    if (useIO && csv.has_hooks & HOOK_BEFORE_PRINT)
+	hook (aTHX_ hv, "before_print", av);
     result = Combine (&csv, io, av);
 #if (PERL_BCDVERSION >= 0x5008000)
     PL_ors_sv = ors;
@@ -1754,7 +1814,7 @@ getline (self, io)
     av  = newAV ();
     avf = newAV ();
     ST (0) = xsParse (self, hv, av, avf, io, 1)
-	?  sv_2mortal (newRV_noinc ((SV *)av))
+	? sv_2mortal (newRV_noinc ((SV *)av))
 	: &PL_sv_undef;
     XSRETURN (1);
     /* XS getline */

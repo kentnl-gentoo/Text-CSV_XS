@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.04";
+$VERSION   = "1.05";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -74,6 +74,7 @@ my %def_attr = (
     auto_diag			=> 0,
     diag_verbose		=> 0,
     types			=> undef,
+    callbacks			=> undef,
 
     _EOF			=> 0,
     _RECNO			=> 0,
@@ -85,6 +86,10 @@ my %def_attr = (
     _COLUMN_NAMES		=> undef,
     _BOUND_COLUMNS		=> undef,
     _AHEAD			=> undef,
+    );
+my %attr_alias = (
+    quote_always		=> "always_quote",
+    verbose_diag		=> "diag_verbose",
     );
 my $last_new_err = Text::CSV_XS->SetDiag (0);
 
@@ -104,35 +109,44 @@ sub _check_sanity
 
 sub new
 {
-    $last_new_err = SetDiag (undef, 1000,
+    $last_new_err = Text::CSV_XS->SetDiag (1000,
 	"usage: my \$csv = Text::CSV_XS->new ([{ option => value, ... }]);");
 
     my $proto = shift;
     my $class = ref ($proto) || $proto	or  return;
     @_ > 0 &&   ref $_[0] ne "HASH"	and return;
     my $attr  = shift || {};
+    my %attr  = map {
+	my $k = m/^[a-zA-Z]\w+$/ ? lc $_ : $_;
+	exists $attr_alias{$k} and $k = $attr_alias{$k};
+	$k => $attr->{$_};
+	} keys %$attr;
 
-    for (keys %{$attr}) {
+    for (keys %attr) {
 	if (m/^[a-z]/ && exists $def_attr{$_}) {
-	    defined $attr->{$_} && $] >= 5.008002 && m/_char$/ and
-		utf8::decode ($attr->{$_});
+	    defined $attr{$_} && $] >= 5.008002 && m/_char$/ and
+		utf8::decode ($attr{$_});
 	    next;
 	    }
 #	croak?
-	$last_new_err = SetDiag (undef, 1000, "INI - Unknown attribute '$_'");
-	$attr->{auto_diag} and error_diag ();
+	$last_new_err = Text::CSV_XS->SetDiag (1000, "INI - Unknown attribute '$_'");
+	$attr{auto_diag} and error_diag ();
 	return;
 	}
 
-    my $self = { %def_attr, %{$attr} };
+    my $self = { %def_attr, %attr };
     if (my $ec = _check_sanity ($self)) {
-	$last_new_err = SetDiag (undef, $ec);
-	$attr->{auto_diag} and error_diag ();
+	$last_new_err = Text::CSV_XS->SetDiag ($ec);
+	$attr{auto_diag} and error_diag ();
 	return;
 	}
+    if ($self->{callbacks} && ref $self->{callbacks} ne "HASH") {
+	carp "The 'callbacks' attribute is set but is not a hash: ignored\n";
+	$self->{callbacks} = undef;
+	}
 
-    $last_new_err = SetDiag (undef, 0);
-    defined $\ && !exists $attr->{eol} and $self->{eol} = $\;
+    $last_new_err = Text::CSV_XS->SetDiag (0);
+    defined $\ && !exists $attr{eol} and $self->{eol} = $\;
     bless $self, $class;
     defined $self->{types} and $self->types ($self->{types});
     $self;
@@ -160,6 +174,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     quote_null			=> 31,
     quote_binary		=> 32,
     decode_utf8			=> 35,
+    _has_hooks			=> 36,
     _is_bound			=> 26,	# 26 .. 29
     );
 
@@ -398,6 +413,33 @@ sub types
 	}
     } # types
 
+sub callbacks
+{
+    my $self = shift;
+    if (@_) {
+	my $cb;
+	my $hf = 0x00;
+	if (!defined $_[0]) {
+	    }
+	else {
+	    $cb = @_ == 1 && ref $_[0] eq "HASH" ? shift 
+	        : @_ % 2 == 0                    ? { @_ }
+	        : croak ($self->SetDiag (1004));
+	    foreach my $cbk (keys %$cb) {
+		(defined $cbk && !ref $cbk && $cbk =~ m/^[\w.]+$/) &&
+		(defined $cb->{$cbk} && ref $cb->{$cbk} eq "CODE") or
+		    croak ($self->SetDiag (1004));
+		}
+	    exists $cb->{error}        and $hf |= 0x01;
+	    exists $cb->{after_parse}  and $hf |= 0x02;
+	    exists $cb->{before_print} and $hf |= 0x04;
+	    }
+	$self->_set_attr_X ("_has_hooks", $hf);
+	$self->{callbacks} = $cb;
+	}
+    $self->{callbacks};
+    } # callbacks
+
 # erro_diag
 #
 #   If (and only if) an error occurred, this function returns a code that
@@ -414,6 +456,9 @@ sub error_diag
 	$diag[1] =     $self->{_ERROR_DIAG};
 	$diag[2] = 1 + $self->{_ERROR_POS} if exists $self->{_ERROR_POS};
 	$diag[3] =     $self->{_RECNO};
+
+	$diag[0] && $self && $self->{callbacks} && $self->{callbacks}{error} and
+	    return $self->{callbacks}{error}->(@diag);
 	}
 
     my $context = wantarray;
@@ -810,13 +855,16 @@ sub csv
 	}
 
     my $frag = $c->{frag};
-    # aoa
-    ref $hdrs or
-	return $frag ? $csv->fragment ($fh, $frag) : $csv->getline_all ($fh);
-
-    # aoh
-    $csv->column_names ($hdrs);
-    return $frag ? $csv->fragment ($fh, $frag) : $csv->getline_hr_all ($fh);
+    my $ref = ref $hdrs
+	? # aoh
+	  do {
+	    $csv->column_names ($hdrs);
+	    $frag ? $csv->fragment ($fh, $frag) : $csv->getline_hr_all ($fh);
+	    }
+	: # aoa
+	    $frag ? $csv->fragment ($fh, $frag) : $csv->getline_all ($fh);
+    $ref or Text::CSV_XS->auto_diag;
+    return $ref;
     } # csv
 
 1;
@@ -1036,11 +1084,16 @@ The following attributes are available:
 =item eol
 X<eol>
 
-An end-of-line string to add to rows.
+The end-of-line string to add to rows for L</print> or the record separator
+for L</getline>.
 
 When not passed in a B<parser> instance, the default behavior is to accept
 C<\n>, C<\r>, and C<\r\n>, so it is probably safer to not specify C<eol> at
 all. Passing C<undef> or the empty string behave the same.
+
+When not passed in a B<generating> instance, lines are not terminated at
+all, so it is probably wise to pass something you expect. A safe choice
+for C<eol> on output is either C<$/> or C<\r\n>.
 
 Common values for C<eol> are C<"\012"> (C<\n> or Line Feed), C<"\015\012">
 (C<\r\n> or Carriage Return, Line Feed), and C<"\015"> (C<\r> or Carriage
@@ -1338,6 +1391,11 @@ Set the verbosity of the C<auto_diag> output. Currently only adds the
 current input line (if known) to the diagnostic output with an indication
 of the position of the error.
 
+=item callbacks
+X<callbacks>
+
+See the L</Callbacks> section below.
+ 
 =back
 
 To sum it up,
@@ -1367,6 +1425,7 @@ is equivalent to
      verbatim              => 0,
      auto_diag             => 0,
      diag_verbose          => 0,
+     callbacks             => undef,
      });
 
 For all of the above mentioned flags, an accessor method is available where
@@ -1573,6 +1632,9 @@ reference will point to a list of hashes instead of to a list of lists.
 
  $csv->column_names ("Name", "Age");
  my $AoH = $csv->fragment ($io, "col=3;8");
+
+If the L</after_parse> callback is active, it is also called on every line
+parsed and skipped before the fragment.
 
 =over 2
 
@@ -1896,8 +1958,8 @@ X<in>
 
 Used to specify the source.  C<in> can be a file name (e.g. C<"file.csv">),
 which will be opened for reading and closed when finished, a file handle (e.g.
-C<$fh> or C<FH>), a reference to a glob (e.g. C<\*ARGV>), or - when your
-version of perl is not archaic - the glob itself (e.g. C<*STDIN>).
+C<$fh> or C<FH>), a reference to a glob (e.g. C<\*ARGV>), or the glob itself
+(e.g. C<*STDIN>).
 
 When used with L</out>, it should be a reference to a CSV structure (AoA or AoH).
 
@@ -1920,8 +1982,7 @@ The L</fragment> attribute is ignored in output mode.
 
 C<out> can be a file name (e.g. C<"file.csv">), which will be opened for
 writing and closed when finished, a file handle (e.g. C<$fh> or C<FH>), a
-reference to a glob (e.g. C<\*STDOUT>), or - when your version of perl is
-not archaic - the glob itself (e.g. C<*STDOUT>).
+reference to a glob (e.g. C<\*STDOUT>), or the glob itself (e.g. C<*STDOUT>).
 
 =head3 encoding
 X<encoding>
@@ -1969,6 +2030,90 @@ Combining all of them could give something like
      fragment => "row=3;6-9;15-*",
      );
  say $aoh->[15]{Foo};
+
+=head2 Callbacks
+
+Callbacks enable actions inside L</Text::CSV_XS>. While most of what this
+offers can easily be done in an unrolled loop as described in the l</SYNOPSIS>
+callbacks can be used to meet special demands or enhance the L</csv> function.
+
+=over 2
+
+=item error
+
+ $csv->callbacks (error => sub { $csv->SetDiag (0) });
+
+the C<error> callback is invoked when an error occurs, but I<only> when
+L</auto_diag> is set to a true value. The callback is passed the values
+returned by L</error_diag>:
+
+ my ($c, $s);
+
+ sub ignore3006
+ {
+     my ($err, $msg, $pos, $recno) = @_;
+     if ($err == 3006) {
+         # ignore this error
+         ($c, $s) = (undef, undef);
+         SetDiag (0);
+         }
+     # Any other error
+     return;
+     } # ignore3006
+
+ $csv->callbacks (error => \&ignore3006);
+ $csv->bind_columns (\$c, \$s);
+ while ($csv->getline ($fh)) {
+     # Error 3006 will not stop the loop
+     }
+
+=item after_parse
+
+ $csv->callbacks (after_parse => sub { push @{$_[1]}, "NEW" });
+ while (my $row = $csv->getline ($fh)) {
+     $row->[-1] eq "NEW";
+     }
+
+This callback is invoked after parsing with L</getline> only if no error
+occurred. The callback is invoked with two arguments:  the current CSV
+parser object and an array reference to the fields parsed.
+
+The return code of the callback is ignored.
+
+ sub add_from_db
+ {
+     my ($csv, $row) = @_;
+     $sth->execute ($row->[4]);
+     push @$row, $sth->fetchrow_array;
+     } # add_from_db
+
+ my $aoa = csv (in => "file.csv", callbacks => {
+     after_parse => \&add_from_db });
+
+=item before_print
+
+ my $idx = 1;
+ $csv->callbacks (before_print => sub { $_[1][0] = $idx++ });
+ $csv->print (*STDOUT, [ 0, $_ ]) for @members;
+
+This callback is invoked before printing with L</print> only if no error
+occurred. The callback is invoked with two arguments:  the current CSV
+parser object and an array reference to the fields passed.
+
+The return code of the callback is ignored.
+
+ sub max_4_fields
+ {
+     my ($csv, $row) = @_;
+     @$row > 4 and splice @$row, 4;
+     } # max_4_fields
+
+ csv (in => csv (in => "file.csv"), out => *STDOUT,
+     callbacks => { before print => \&max_4_fields });
+
+This callback is not active for L</combine>.
+
+=back
 
 =head1 INTERNALS
 
@@ -2177,8 +2322,10 @@ Returning something like
      },
    ]
 
-Note that L</getline_all> already returns all rows for an open stream, but
-this will not return flags.
+Note that the L</csv> function already supports most of this, but does not
+return flags. L</getline_all> returns all rows for an open stream, but this
+will not return flags either. L</fragment> can reduce the required rows I<or>
+columns, but cannot combine them.
 
 =back
 
@@ -2303,6 +2450,12 @@ X<1003>
 
 Using default C<eol> characters in either C<sep_char>, C<quote_char>, or
 C<escape_char> is not allowed.
+
+=item *
+1004 "INI - callbacks should be undef or a hashref"
+X<1004>
+
+The C<callbacks> attribute only allows to be C<undef> or a hash reference.
 
 =item *
 2010 "ECR - QUO char inside quotes followed by CR not part of EOL"
