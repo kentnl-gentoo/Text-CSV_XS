@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.05";
+$VERSION   = "1.06";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -93,18 +93,25 @@ my %attr_alias = (
     );
 my $last_new_err = Text::CSV_XS->SetDiag (0);
 
-sub _check_sanity
+# NOT a method: is also used before bless
+sub _unhealthy_whitespace
 {
-    my $attr = shift;
-    for (qw( sep_char quote_char escape_char )) {
-	defined $attr->{$_} && $attr->{$_} =~ m/[\r\n]/ and
-	    return 1003;
-	}
-    $attr->{allow_whitespace} and
-      (defined $attr->{quote_char}  && $attr->{quote_char}  =~ m/^[ \t]$/) ||
-      (defined $attr->{escape_char} && $attr->{escape_char} =~ m/^[ \t]$/) and
+    my $self = shift;
+    $_[0] and
+      (defined $self->{quote_char}  && $self->{quote_char}  =~ m/^[ \t]$/) ||
+      (defined $self->{escape_char} && $self->{escape_char} =~ m/^[ \t]$/) and
 	return 1002;
     return 0;
+    } # _sane_whitespace
+
+sub _check_sanity
+{
+    my $self = shift;
+    for (qw( sep_char quote_char escape_char )) {
+	defined $self->{$_} && $self->{$_} =~ m/[\r\n]/ and
+	    return 1003;
+	}
+    return _unhealthy_whitespace ($self, $self->{allow_whitespace});
     } # _check_sanity
 
 sub new
@@ -124,6 +131,7 @@ sub new
 
     for (keys %attr) {
 	if (m/^[a-z]/ && exists $def_attr{$_}) {
+	    # uncoverable condition false
 	    defined $attr{$_} && $] >= 5.008002 && m/_char$/ and
 		utf8::decode ($attr{$_});
 	    next;
@@ -140,8 +148,8 @@ sub new
 	$attr{auto_diag} and error_diag ();
 	return;
 	}
-    if ($self->{callbacks} && ref $self->{callbacks} ne "HASH") {
-	carp "The 'callbacks' attribute is set but is not a hash: ignored\n";
+    if (defined $self->{callbacks} && ref $self->{callbacks} ne "HASH") {
+	warn "The 'callbacks' attribute is set but is not a hash: ignored\n";
 	$self->{callbacks} = undef;
 	}
 
@@ -316,9 +324,7 @@ sub allow_whitespace
     my $self = shift;
     if (@_) {
 	my $aw = shift;
-	$aw and
-	  (defined $self->{quote_char}  && $self->{quote_char}  =~ m/^[ \t]$/) ||
-	  (defined $self->{escape_char} && $self->{escape_char} =~ m/^[ \t]$/) and
+	_unhealthy_whitespace ($self, $aw) and
 	    croak ($self->SetDiag (1002));
 	$self->_set_attr_X ("allow_whitespace", $aw);
 	}
@@ -359,7 +365,7 @@ sub auto_diag
     if (@_) {
 	my $v = shift;
 	!defined $v || $v eq "" and $v = 0;
-	$v =~ m/^[0-9]/ or $v = $v ? 1 : 0; # default for true/false
+	$v =~ m/^[0-9]/ or $v = lc $v eq "false" ? 0 : 1; # true/truth = 1
 	$self->_set_attr_X ("auto_diag", $v);
 	}
     $self->{auto_diag};
@@ -371,7 +377,7 @@ sub diag_verbose
     if (@_) {
 	my $v = shift;
 	!defined $v || $v eq "" and $v = 0;
-	$v =~ m/^[0-9]/ or $v = $v ? 1 : 0; # default for true/false
+	$v =~ m/^[0-9]/ or $v = lc $v eq "false" ? 0 : 1; # true/truth = 1
 	$self->_set_attr_X ("diag_verbose", $v);
 	}
     $self->{diag_verbose};
@@ -419,20 +425,22 @@ sub callbacks
     if (@_) {
 	my $cb;
 	my $hf = 0x00;
-	if (!defined $_[0]) {
-	    }
-	else {
+	if (defined $_[0]) {
+	    grep { !defined $_ } @_ and croak ($self->SetDiag (1004));
 	    $cb = @_ == 1 && ref $_[0] eq "HASH" ? shift 
 	        : @_ % 2 == 0                    ? { @_ }
 	        : croak ($self->SetDiag (1004));
 	    foreach my $cbk (keys %$cb) {
-		(defined $cbk && !ref $cbk && $cbk =~ m/^[\w.]+$/) &&
-		(defined $cb->{$cbk} && ref $cb->{$cbk} eq "CODE") or
+		(!ref $cbk && $cbk =~ m/^[\w.]+$/) && ref $cb->{$cbk} eq "CODE" or
 		    croak ($self->SetDiag (1004));
 		}
 	    exists $cb->{error}        and $hf |= 0x01;
 	    exists $cb->{after_parse}  and $hf |= 0x02;
 	    exists $cb->{before_print} and $hf |= 0x04;
+	    }
+	elsif (@_ > 1) {
+	    # (undef, whatever)
+	    croak ($self->SetDiag (1004));
 	    }
 	$self->_set_attr_X ("_has_hooks", $hf);
 	$self->{callbacks} = $cb;
@@ -559,8 +567,8 @@ sub is_binary
 sub is_missing
 {
     my ($self, $idx, $val) = @_;
-    ref $self->{_FFLAGS} &&
-	$idx >= 0 && $idx < @{$self->{_FFLAGS}} or return;
+    $idx < 0 || !ref $self->{_FFLAGS} and return;
+    $idx >= @{$self->{_FFLAGS}} and return 1;
     $self->{_FFLAGS}[$idx] & 0x0010 ? 1 : 0;
     } # is_missing
 
@@ -782,6 +790,7 @@ sub _csv_attr
     my $enc = delete $attr{encoding} || "";
 
     my $fh;
+    my $cls = 0;	# If I open a file, I have to close it
     my $in  = delete $attr{in}  || delete $attr{file} or croak $csv_usage;
     my $out = delete $attr{out} || delete $attr{file};
     if (ref $in eq "ARRAY") {
@@ -794,6 +803,7 @@ sub _csv_attr
 	else {
 	    $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 	    open $fh, ">$enc", $out or croak "$out: $!";
+	    $cls = 1;
 	    }
 	}
     elsif (ref $in or "GLOB" eq ref \$in) {
@@ -807,11 +817,19 @@ sub _csv_attr
     else {
 	$enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 	open $fh, "<$enc", $in or croak "$in: $!";
+	$cls = 1;
 	}
     $fh or croak qq{No valid source passed. "in" is required};
 
     my $hdrs = delete $attr{headers};
     my $frag = delete $attr{fragment};
+
+    my $cbai = delete $attr{callbacks}{after_in}   ||
+	       delete $attr{after_in};
+    my $cbbo = delete $attr{callbacks}{before_out} ||
+	       delete $attr{before_out};
+    my $cboi = delete $attr{callbacks}{on_in}      ||
+	       delete $attr{on_in};
 
     defined $attr{auto_diag} or $attr{auto_diag} = 1;
     my $csv = Text::CSV_XS->new (\%attr) or croak $last_new_err;
@@ -819,10 +837,14 @@ sub _csv_attr
     return {
 	csv  => $csv,
 	fh   => $fh,
+	cls  => $cls,
 	in   => $in,
 	out  => $out,
 	hdrs => $hdrs,
 	frag => $frag,
+	cbai => $cbai,
+	cbbo => $cbbo,
+	cboi => $cboi,
 	};
     } # _csv_attr
 
@@ -832,21 +854,31 @@ sub csv
     @_ && ref $_[0] ne __PACKAGE__ or croak $csv_usage;
 
     my $c = _csv_attr (@_);
+
     my ($csv, $fh, $hdrs) = @{$c}{"csv", "fh", "hdrs"};
 
     if ($c->{out}) {
 	if (ref $c->{in}[0] eq "ARRAY") { # aoa
 	    ref $hdrs and $csv->print ($fh, $hdrs);
-	    $csv->print ($fh, $_) for @{$c->{in}};
+	    for (@{$c->{in}}) {
+		$c->{cboi} and $c->{cboi}->($csv, $_);
+		$c->{cbbo} and $c->{cbbo}->($csv, $_);
+		$csv->print ($fh, $_);
+		}
 	    }
 	else { # aoh
 	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$c->{in}[0]};
 	    defined $hdrs or $hdrs = "auto";
 	    ref $hdrs || $hdrs eq "auto" and $csv->print ($fh, \@hdrs);
-	    $csv->print ($fh, [ @{$_}{@hdrs} ]) for @{$c->{in}};
+	    for (@{$c->{in}}) {
+		$c->{cboi} and $c->{cboi}->($csv, $_);
+		$c->{cbbo} and $c->{cbbo}->($csv, $_);
+		$csv->print ($fh, [ @{$_}{@hdrs} ]);
+		}
 	    }
 
-	return close $fh;
+	$c->{cls} and close $fh;
+	return 1;
 	}
 
     if (defined $hdrs && !ref $hdrs) {
@@ -864,6 +896,13 @@ sub csv
 	: # aoa
 	    $frag ? $csv->fragment ($fh, $frag) : $csv->getline_all ($fh);
     $ref or Text::CSV_XS->auto_diag;
+    $c->{cls} and close $fh;
+    if ($ref and $c->{cbai} || $c->{cboi}) {
+	for (@{$ref}) {
+	    $c->{cbai} and $c->{cbai}->($csv, $_);
+	    $c->{cboi} and $c->{cboi}->($csv, $_);
+	    }
+	}
     return $ref;
     } # csv
 
@@ -1616,6 +1655,7 @@ It is just a wrapper method with basic parameter checks over
  $csv->print ($io, [ map { $ref->{$_} } $csv->column_names ]);
 
 =head2 fragment
+X<fragment>
 
 This function tries to implement RFC7111 (URI Fragment Identifiers for the
 text/csv Media Type) - http://tools.ietf.org/html/rfc7111
@@ -1839,6 +1879,7 @@ X<is_missing>
 Where C<$column_idx> is the (zero-based) index of the column in the last
 result of L</getline_hr>.
 
+ $csv->keep_meta_info (1);
  while (my $hr = $csv->getline_hr ($fh)) {
      $csv->is_missing (0) and next; # This was an empty line
      }
@@ -2034,12 +2075,13 @@ Combining all of them could give something like
 =head2 Callbacks
 
 Callbacks enable actions inside L</Text::CSV_XS>. While most of what this
-offers can easily be done in an unrolled loop as described in the l</SYNOPSIS>
+offers can easily be done in an unrolled loop as described in the L</SYNOPSIS>
 callbacks can be used to meet special demands or enhance the L</csv> function.
 
 =over 2
 
 =item error
+X<error>
 
  $csv->callbacks (error => sub { $csv->SetDiag (0) });
 
@@ -2068,6 +2110,7 @@ returned by L</error_diag>:
      }
 
 =item after_parse
+X<after_parse>
 
  $csv->callbacks (after_parse => sub { push @{$_[1]}, "NEW" });
  while (my $row = $csv->getline ($fh)) {
@@ -2091,6 +2134,7 @@ The return code of the callback is ignored.
      after_parse => \&add_from_db });
 
 =item before_print
+X<before_print>
 
  my $idx = 1;
  $csv->callbacks (before_print => sub { $_[1][0] = $idx++ });
@@ -2112,6 +2156,63 @@ The return code of the callback is ignored.
      callbacks => { before print => \&max_4_fields });
 
 This callback is not active for L</combine>.
+
+=back
+
+=head3 Callbacks for csv ()
+
+The L</csv> allows for some callbacks that do not integrate in XS internals
+but only feature the L</csv> function.
+
+  csv (in        => "file.csv",
+       callbacks => {
+           after_parse  => sub { say "AFTER PARSE";  }, # first
+           after_in     => sub { say "AFTER IN";     }, # second
+           on_in        => sub { say "ON IN";        }, # third
+           },
+       );
+
+  csv (in        => $aoh,
+       out       => "file.csv",
+       callbacks => {
+           on_in        => sub { say "ON IN";        }, # first
+           before_out   => sub { say "BEFORE OUT";   }, # second
+           before_print => sub { say "BEFORE PRINT"; }, # third
+           },
+       );
+
+=over 2
+
+=item after_in
+X<after_in>
+
+This callback is invoked for each record after all records have been parsed
+but before returning the reference to the caller. The hook is invoked with
+two arguments: the current CSV parser object and a reference to the record.
+The reference can be a reference to a HASH or a reference to an ARRAY as
+determined by the arguments.
+
+This callback can also be passed as an attribute without the C<callbacks>
+wrapper.
+
+=item before_out
+X<before_out>
+
+This callback is invoked for each record before the record is printed.  The
+hook is invoked with two arguments: the current CSV parser object and a
+reference to the record.  The reference can be a reference to a HASH or a
+reference to an ARRAY as determined by the arguments.
+
+This callback can also be passed as an attribute without the C<callbacks>
+wrapper.
+
+=item on_in
+X<on_in>
+
+This callback acts exactly as the L</after_in> or the L</before_out> hooks.
+
+This callback can also be passed as an attribute without the C<callbacks>
+wrapper.
 
 =back
 
