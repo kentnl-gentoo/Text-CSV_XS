@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.06";
+$VERSION   = "1.07";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -427,7 +427,7 @@ sub callbacks
 	my $hf = 0x00;
 	if (defined $_[0]) {
 	    grep { !defined $_ } @_ and croak ($self->SetDiag (1004));
-	    $cb = @_ == 1 && ref $_[0] eq "HASH" ? shift 
+	    $cb = @_ == 1 && ref $_[0] eq "HASH" ? shift
 	        : @_ % 2 == 0                    ? { @_ }
 	        : croak ($self->SetDiag (1004));
 	    foreach my $cbk (keys %$cb) {
@@ -703,14 +703,15 @@ sub fragment
 {
     my ($self, $io, $spec) = @_;
 
-    my $qd = qr{\s* [0-9]+ \s* }x;
-    my $qr = qr{$qd (?: - (?: $qd | \s* \* \s* ))?}x;
-    my $qc = qr{$qr (?: ; $qr)*}x;
+    my $qd = qr{\s* [0-9]+ \s* }x;		# digit
+    my $qs = qr{\s* (?: [0-9]+ | \* ) \s*}x;	# digit or star
+    my $qr = qr{$qd (?: - $qs )?}x;		# range
+    my $qc = qr{$qr (?: ; $qr )*}x;		# list
     defined $spec && $spec =~ m{^ \s*
 	\x23 ? \s*			# optional leading #
 	( row | col | cell ) \s* =
 	( $qc				# for row and col
-	| $qd , $qd (?: - $qd , $qd)?	# for cell
+	| $qd , $qd (?: - $qs , $qs)?	# for cell
 	) \s* $}xi or croak ($self->SetDiag (2013));
     my ($type, $range) = (lc $1, $2);
 
@@ -720,24 +721,28 @@ sub fragment
     if ($type eq "cell") {
 	my ($tlr, $tlc, $brr, $brc) = ($range =~ m{
 	    ^ \s*
-		([0-9]+) \s* , \s* ([0-9]+)
+		([0-9]+     ) \s* , \s* ([0-9]+     )
 	    \s* (?: - \s*
-		([0-9]+) \s* , \s* ([0-9]+)
+		([0-9]+ | \*) \s* , \s* ([0-9]+ | \*)
 		)?
 	    \s* $}x) or croak ($self->SetDiag (2013));
 	defined $brr or ($brr, $brc) = ($tlr, $tlc);
-	$tlr <= 0 || $tlc <= 0 || $brr <= 0 || $brc <= 0 ||
-	    $brr < $tlr || $brc < $tlc and croak ($self->SetDiag (2013));
-	$_-- for $tlc, $brc;
+	$tlr == 0 || $tlc == 0 ||
+	    ($brr ne "*" && ($brr == 0 || $brr < $tlr)) ||
+	    ($brc ne "*" && ($brc == 0 || $brc < $tlc))
+		and croak ($self->SetDiag (2013));
+	$tlc--;
+	$brc-- unless $brc eq "*";
 	my $r = 0;
 	while (my $row = $self->getline ($io)) {
 	    ++$r <  $tlr and next;
-	    push @c, [ @{$row}[$tlc..$brc] ];
+	    my $rr = $brc eq "*" ? $#$row : $brc;
+	    push @c, [ @{$row}[$tlc..$rr] ];
 	    if (@h) {
 		my %h; @h{@h} = @{$c[-1]};
 		$c[-1] = \%h;
 		}
-	    $r >= $brr and last;
+	    $brr ne "*" && $r >= $brr and last;
 	    }
 	return \@c;
 	}
@@ -783,7 +788,7 @@ my $csv_usage = q{usage: my $aoa = csv (in => $file);};
 
 sub _csv_attr
 {
-    my %attr = (@_ == 1 && ref $_[0] eq "HASH" ? %{$_[0]} : @_) or die;
+    my %attr = (@_ == 1 && ref $_[0] eq "HASH" ? %{$_[0]} : @_) or croak;
 
     $attr{binary} = 1;
 
@@ -793,9 +798,9 @@ sub _csv_attr
     my $cls = 0;	# If I open a file, I have to close it
     my $in  = delete $attr{in}  || delete $attr{file} or croak $csv_usage;
     my $out = delete $attr{out} || delete $attr{file};
-    if (ref $in eq "ARRAY") {
-	# we need an out
-	$out or croak qq{for CSV source, "out" is required};
+
+    if ($out) {
+	$in or croak $csv_usage;	# No out without in
 	defined $attr{eol} or $attr{eol} = "\r\n";
 	if (ref $out or "GLOB" eq ref \$out) {
 	    $fh = $out;
@@ -805,6 +810,17 @@ sub _csv_attr
 	    open $fh, ">$enc", $out or croak "$out: $!";
 	    $cls = 1;
 	    }
+	}
+
+    if (   ref $in eq "CODE") {		# we need an out
+	$out or croak qq{for CSV source, "out" is required};
+	}
+    elsif (ref $in eq "ARRAY") {	# we need an out
+	$out or croak qq{for CSV source, "out" is required};
+	}
+    elsif (ref $in eq "SCALAR") {
+	open $fh, "<", $in or croak "Cannot open from SCALAR usinng PerlIO";
+	$cls = 1;
 	}
     elsif (ref $in or "GLOB" eq ref \$in) {
 	if (!ref $in && $] < 5.008005) {
@@ -855,22 +871,39 @@ sub csv
 
     my $c = _csv_attr (@_);
 
-    my ($csv, $fh, $hdrs) = @{$c}{"csv", "fh", "hdrs"};
+    my ($csv, $in, $fh, $hdrs) = @{$c}{"csv", "in", "fh", "hdrs"};
 
     if ($c->{out}) {
-	if (ref $c->{in}[0] eq "ARRAY") { # aoa
+	if (ref $in eq "CODE") {
+	    my $hdr = 1;
+	    while (my $row = $in->($csv)) {
+		if (ref $row eq "ARRAY") {
+		    $csv->print ($fh, $row);
+		    next;
+		    }
+		if (ref $row eq "HASH") {
+		    if ($hdr) {
+			$hdrs ||= [ keys %$row ];
+			$csv->print ($fh, $hdrs);
+			$hdr = 0;
+			}
+		    $csv->print ($fh, [ @{$row}{@$hdrs} ]);
+		    }
+		}
+	    }
+	elsif (ref $in->[0] eq "ARRAY") { # aoa
 	    ref $hdrs and $csv->print ($fh, $hdrs);
-	    for (@{$c->{in}}) {
+	    for (@{$in}) {
 		$c->{cboi} and $c->{cboi}->($csv, $_);
 		$c->{cbbo} and $c->{cbbo}->($csv, $_);
 		$csv->print ($fh, $_);
 		}
 	    }
 	else { # aoh
-	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$c->{in}[0]};
+	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$in->[0]};
 	    defined $hdrs or $hdrs = "auto";
 	    ref $hdrs || $hdrs eq "auto" and $csv->print ($fh, \@hdrs);
-	    for (@{$c->{in}}) {
+	    for (@{$in}) {
 		$c->{cboi} and $c->{cboi}->($csv, $_);
 		$c->{cbbo} and $c->{cbbo}->($csv, $_);
 		$csv->print ($fh, [ @{$_}{@hdrs} ]);
@@ -880,6 +913,8 @@ sub csv
 	$c->{cls} and close $fh;
 	return 1;
 	}
+
+    ref $in eq "CODE" and croak "CODE only valid fro in when using out";
 
     if (defined $hdrs && !ref $hdrs) {
 	$hdrs eq "skip" and         $csv->getline ($fh);
@@ -965,6 +1000,7 @@ L</parse> method, which is more complicated from the usual point of usage:
  while (<>) {		#  WRONG!
      $csv->parse ($_);
      my @fields = $csv->fields ();
+     }
 
 will break, as the while might read broken lines, as that does not care
 about the quoting. If you need to support embedded newlines, the way to go
@@ -975,10 +1011,11 @@ C<\r\n> by default) and then
  open my $io, "<", $file or die "$file: $!";
  while (my $row = $csv->getline ($io)) {
      my @fields = @$row;
+     }
 
 The old(er) way of using global file handles is still supported
 
- while (my $row = $csv->getline (*ARGV)) {
+ while (my $row = $csv->getline (*ARGV)) { ... }
 
 =head2 Unicode
 
@@ -1305,7 +1342,7 @@ escaped as C<"0>.) By default this feature is off.
 If a string is marked UTF8, binary will be turned on automatically when
 binary characters other than CR or NL are encountered. Note that a simple
 string like C<"\x{00a0}"> might still be binary, but not marked UTF8, so
-setting C<{ binary => 1 }> is still a wise option.
+setting C<< { binary => 1 } >> is still a wise option.
 
 =item decode_utf8
 X<decode_utf8>
@@ -1339,9 +1376,8 @@ X<always_quote>
 By default the generated fields are quoted only if they need to be. For
 example, if they contain the separator character. If you set this attribute
 to a TRUE value, then all defined fields will be quoted. (C<undef> fields
-are not quoted, see L</blank_is_undef>)). This is typically easier to
-handle in external applications. (Poor creatures who are not using
-Text::CSV_XS. :-)
+are not quoted, see L</blank_is_undef>). This is typically easier to handle
+in external applications. (Poor creatures who are not using Text::CSV_XS. :)
 
 =item quote_space
 X<quote_space>
@@ -1434,7 +1470,7 @@ of the position of the error.
 X<callbacks>
 
 See the L</Callbacks> section below.
- 
+
 =back
 
 To sum it up,
@@ -1702,6 +1738,12 @@ The range operator using cells can be used to define top-left and bottom-right
 cell location
 
  cell=3,1-4,6
+
+The C<*> is only allowed in the second part of a pair
+
+ cell=3,2-*,2    # row 3 till end, only column 2
+ cell=3,2-3,*    # column 2 till end, only row 3
+ cell=3,2-*,*    # strip row 1 and 2, and column 1
 
 =back
 
@@ -1999,10 +2041,12 @@ X<in>
 
 Used to specify the source.  C<in> can be a file name (e.g. C<"file.csv">),
 which will be opened for reading and closed when finished, a file handle (e.g.
-C<$fh> or C<FH>), a reference to a glob (e.g. C<\*ARGV>), or the glob itself
-(e.g. C<*STDIN>).
+C<$fh> or C<FH>), a reference to a glob (e.g. C<\*ARGV>), the glob itself
+(e.g. C<*STDIN>), or a reference to a scalar (e.g. C<\q{1,2,"csv"}>).
 
-When used with L</out>, it should be a reference to a CSV structure (AoA or AoH).
+When used with L</out>, C<in> should be a reference to a CSV structure (AoA
+or AoH) or a CODE-ref that returns an array-reference or a hash-reference.
+The code-ref will be invoked with no arguments and .
 
  my $aoa = csv (in => "file.csv");
 
@@ -2024,6 +2068,15 @@ The L</fragment> attribute is ignored in output mode.
 C<out> can be a file name (e.g. C<"file.csv">), which will be opened for
 writing and closed when finished, a file handle (e.g. C<$fh> or C<FH>), a
 reference to a glob (e.g. C<\*STDOUT>), or the glob itself (e.g. C<*STDOUT>).
+
+ csv (in => sub { $sth->fetch },            out => "dump.csv");
+ csv (in => sub { $sth->fetchrow_hashref }, out => "dump.csv",
+      headers => $sth->{NAME_lc});
+
+When a code-ref is used, the output is generated per invocation, so no
+buffering is involved. This implies that there is no size restriction on
+the number of records. The function ends when the coderef returns a false
+value.
 
 =head3 encoding
 X<encoding>
@@ -2721,11 +2774,11 @@ L<perl>, L<IO::File>, L<IO::Handle>, L<IO::Wrap>, L<Text::CSV>,
 L<Text::CSV_PP>, L<Text::CSV::Encoded>, L<Text::CSV::Separator>, and
 L<Spreadsheet::Read>.
 
-=head1 AUTHORS and MAINTAINERS
+=head1 AUTHOR
 
 Alan Citterman F<E<lt>alan@mfgrtl.comE<gt>> wrote the original Perl module.
-Please don't send mail concerning Text::CSV_XS to Alan, as he's not
-involved in the C part that is now the main part of the module.
+Please don't send mail concerning Text::CSV_XS to Alan, as he is not
+involved in the C/XS part that is now the main part of the module.
 
 Jochen Wiedmann F<E<lt>joe@ispsoft.deE<gt>> rewrote the encoding and
 decoding in C by implementing a simple finite-state machine and added the
@@ -2734,8 +2787,8 @@ print and getline methods. See F<ChangeLog> releases 0.10 through 0.23.
 
 H.Merijn Brand F<E<lt>h.m.brand@xs4all.nlE<gt>> cleaned up the code, added
 the field flags methods, wrote the major part of the test suite, completed
-the documentation, fixed some RT bugs and added all the allow flags. See
-ChangeLog releases 0.25 and on.
+the documentation, fixed most RT bugs, added all the allow flags and the
+L</csv> function. See ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
