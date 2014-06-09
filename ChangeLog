@@ -1,3 +1,6 @@
+1.09	- 2014-06-09, H.Merijn Brand
+    * Missed defined-or need in csv2xls (RT#95787)
+
 1.08	- 2014-05-17, H.Merijn Brand
     * Documentation updates
     * Allow disjointed CSV cell fragment lists
@@ -21,7 +24,7 @@
     * Make subclassing safer
 
 1.04	- 2014-02-06, H.Merijn Brand
-    * get_columns () with no argument now returns the empty list
+    * column_names () with no argument now returns the empty list
       instead of undef when no columns defined
     * fragments (rfc7111) now also support AoH (was AoA only)
     * Error code conflict for fragments resolved to 2013
