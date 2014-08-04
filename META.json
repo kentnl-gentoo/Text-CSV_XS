@@ -1,30 +1,28 @@
 {
-   "abstract" : "Comma-Separated Values manipulation routines",
-   "license" : [
-      "perl_5"
-   ],
+   "name" : "Text-CSV_XS",
    "dynamic_config" : 1,
+   "generated_by" : "Author",
    "prereqs" : {
-      "build" : {
-         "requires" : {
-            "Config" : "0"
-         }
-      },
       "test" : {
          "requires" : {
             "Tie::Scalar" : "0",
             "Test::More" : "0"
          }
       },
-      "runtime" : {
-         "recommends" : {
-            "perl" : "5.018002",
-            "Encode" : "2.62"
-         },
+      "build" : {
          "requires" : {
-            "IO::Handle" : "0",
+            "Config" : "0"
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "DynaLoader" : "0",
             "perl" : "5.006001",
-            "DynaLoader" : "0"
+            "IO::Handle" : "0"
+         },
+         "recommends" : {
+            "Encode" : "2.62",
+            "perl" : "5.020000"
          }
       },
       "configure" : {
@@ -33,31 +31,33 @@
          }
       }
    },
+   "abstract" : "Comma-Separated Values manipulation routines",
+   "meta-spec" : {
+      "version" : "2",
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec"
+   },
+   "release_status" : "stable",
    "provides" : {
       "Text::CSV_XS" : {
-         "version" : "1.09",
-         "file" : "CSV_XS.pm"
+         "file" : "CSV_XS.pm",
+         "version" : "1.10"
       }
    },
    "resources" : {
-      "repository" : {
-         "web" : "http://repo.or.cz/w/Text-CSV_XS.git",
-         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
-         "type" : "git"
-      },
       "license" : [
          "http://dev.perl.org/licenses/"
-      ]
+      ],
+      "repository" : {
+         "url" : "http://repo.or.cz/r/Text-CSV_XS.git",
+         "type" : "git",
+         "web" : "http://repo.or.cz/w/Text-CSV_XS.git"
+      }
    },
    "author" : [
       "H.Merijn Brand <h.m.brand@xs4all.nl>"
    ],
-   "name" : "Text-CSV_XS",
-   "release_status" : "stable",
-   "meta-spec" : {
-      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
-      "version" : "2"
-   },
-   "version" : "1.09",
-   "generated_by" : "Author"
+   "version" : "1.10",
+   "license" : [
+      "perl_5"
+   ]
 }

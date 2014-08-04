@@ -139,9 +139,6 @@ open $fh, "<", $fn or die "$fn: $!";
 is (do { local $/; <$fh> }, "1,foo\n2,bar\n3,\n", "Modified output");
 close $fh;
 
-is_deeply (Text::CSV_XS::csv (in => $fn, callbacks => $callbacks),
-    [[1,"foo","NEW"],[2,"bar","NEW"],[3,"","NEW"]], "using getline_all");
-
 # Test the non-IO interface
 ok ($csv->parse ("10,blah,33\n"),			"parse");
 is_deeply ([ $csv->fields ], [ 10, "blah", 33, "NEW" ],	"fields");
@@ -150,6 +147,9 @@ ok ($csv->combine (11, "fri", 22, 18),			"combine - no hook");
 is ($csv->string, qq{11,fri,22,18\n},			"string");
 
 is ($csv->callbacks (undef), undef,			"clear callbacks");
+
+is_deeply (Text::CSV_XS::csv (in => $fn, callbacks => $callbacks),
+    [[1,"foo","NEW"],[2,"bar","NEW"],[3,"","NEW"]], "using getline_all");
 
 __END__
 1,foo

@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.09";
+$VERSION   = "1.10";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -57,6 +57,7 @@ my %def_attr = (
     escape_char			=> '"',
     sep_char			=> ',',
     eol				=> '',
+    sep				=> undef,
     always_quote		=> 0,
     quote_space			=> 1,
     quote_null			=> 1,
@@ -129,6 +130,11 @@ sub new
 	$k => $attr->{$_};
 	} keys %$attr;
 
+    my $sep_aliased = 0;
+    if (defined $attr{sep}) {
+	$attr{sep_char} = delete $attr{sep};
+	$sep_aliased = 1;
+	}
     for (keys %attr) {
 	if (m/^[a-z]/ && exists $def_attr{$_}) {
 	    # uncoverable condition false
@@ -140,6 +146,16 @@ sub new
 	$last_new_err = Text::CSV_XS->SetDiag (1000, "INI - Unknown attribute '$_'");
 	$attr{auto_diag} and error_diag ();
 	return;
+	}
+    if ($sep_aliased) {
+	my @b = unpack "U0C*", $attr{sep_char};
+	if (@b > 1) {
+	    $attr{sep} = $attr{sep_char};
+	    $attr{sep_char} = "\0";
+	    }
+	else {
+	    $attr{sep} = undef;
+	    }
 	}
 
     my $self = { %def_attr, %attr };
@@ -165,6 +181,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     quote_char			=>  0,
     escape_char			=>  1,
     sep_char			=>  2,
+    sep				=> 38,	# 38 .. 54
     binary			=>  3,
     keep_meta_info		=>  4,
     always_quote		=>  5,
@@ -220,29 +237,48 @@ sub _set_attr_N
 sub quote_char
 {
     my $self = shift;
-    if (@_) {
-	my $qc = shift;
-	$self->_set_attr_C ("quote_char", $qc);
-	}
+    @_ and $self->_set_attr_C ("quote_char",  shift);
     $self->{quote_char};
     } # quote_char
 
 sub escape_char
 {
     my $self = shift;
-    if (@_) {
-	my $ec = shift;
-	$self->_set_attr_C ("escape_char", $ec);
-	}
+    @_ and $self->_set_attr_C ("escape_char", shift);
     $self->{escape_char};
     } # escape_char
 
 sub sep_char
 {
     my $self = shift;
-    @_ and $self->_set_attr_C ("sep_char", shift);
+    if (@_) {
+	$self->_set_attr_C ("sep_char", shift);
+	$self->_cache_set ($_cache_id{sep}, "");
+	}
     $self->{sep_char};
     } # sep_char
+
+sub sep
+{
+    my $self = shift;
+    if (@_) {
+	my $sep = shift;
+	defined $sep or $sep = "";
+	$] >= 5.008002 and utf8::decode ($sep);
+	my @b = unpack "U0C*", $sep;
+	if (@b > 1) {
+	    $self->sep_char ("\0");
+	    }
+	else {
+	    $self->sep_char ($sep);
+	    $sep = "";
+	    }
+	$self->{sep} = $sep;
+	$self->_cache_set ($_cache_id{sep}, $sep);
+	}
+    my $sep = $self->{sep};
+    defined $sep && length ($sep) ? $sep : $self->{sep_char};
+    } # sep
 
 sub eol
 {
@@ -809,6 +845,7 @@ sub _csv_attr
     $attr{binary} = 1;
 
     my $enc = delete $attr{encoding} || "";
+    $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 
     my $fh;
     my $cls = 0;	# If I open a file, I have to close it
@@ -818,11 +855,10 @@ sub _csv_attr
     if ($out) {
 	$in or croak $csv_usage;	# No out without in
 	defined $attr{eol} or $attr{eol} = "\r\n";
-	if (ref $out or "GLOB" eq ref \$out) {
+	if ((ref $out and ref $out ne "SCALAR") or "GLOB" eq ref \$out) {
 	    $fh = $out;
 	    }
 	else {
-	    $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 	    open $fh, ">$enc", $out or croak "$out: $!";
 	    $cls = 1;
 	    }
@@ -835,7 +871,9 @@ sub _csv_attr
 	$out or croak qq{for CSV source, "out" is required};
 	}
     elsif (ref $in eq "SCALAR") {
-	open $fh, "<", $in or croak "Cannot open from SCALAR usinng PerlIO";
+	# Strings with code points over 0xFF may not be mapped into in-memory file handles
+	# "<$enc" does not change that :(
+	open $fh, "<", $in or croak "Cannot open from SCALAR using PerlIO";
 	$cls = 1;
 	}
     elsif (ref $in or "GLOB" eq ref \$in) {
@@ -847,7 +885,6 @@ sub _csv_attr
 	    }
 	}
     else {
-	$enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 	open $fh, "<$enc", $in or croak "$in: $!";
 	$cls = 1;
 	}
@@ -856,11 +893,13 @@ sub _csv_attr
     my $hdrs = delete $attr{headers};
     my $frag = delete $attr{fragment};
 
-    my $cbai = delete $attr{callbacks}{after_in}   ||
-	       delete $attr{after_in};
-    my $cbbo = delete $attr{callbacks}{before_out} ||
+    my $cbai = delete $attr{callbacks}{after_in}    ||
+	       delete $attr{after_in}               ||
+	       delete $attr{callbacks}{after_parse} ||
+	       delete $attr{after_parse};
+    my $cbbo = delete $attr{callbacks}{before_out}  ||
 	       delete $attr{before_out};
-    my $cboi = delete $attr{callbacks}{on_in}      ||
+    my $cboi = delete $attr{callbacks}{on_in}       ||
 	       delete $attr{on_in};
 
     defined $attr{auto_diag} or $attr{auto_diag} = 1;
@@ -1191,7 +1230,7 @@ Common values for C<eol> are C<"\012"> (C<\n> or Line Feed),  C<"\015\012">
 (C<\r\n> or Carriage Return, Line Feed),  and C<"\015">  (C<\r> or Carriage
 Return). The L<C<eol>|/eol> attribute cannot exceed 7 (ASCII) characters.
 
-If both C<$/> and L<C<eol>/eol> equal C<"\015">,  parsing lines that end on
+If both C<$/> and L<C<eol>|/eol> equal C<"\015">, parsing lines that end on
 only a Carriage Return without Line Feed, will be L</parse>d correct.
 
 =item sep_char
@@ -1199,10 +1238,20 @@ X<sep_char>
 
 The char used to separate fields, by default a comma. (C<,>).  Limited to a
 single-byte character, usually in the range from C<0x20> (space) to C<0x7E>
-(tilde).
+(tilde). When longer sequences are required, use L<C<sep>|/sep>.
 
 The separation character can not be equal to the quote character  or to the
 escape character.
+
+See also L</CAVEATS>
+
+=item sep
+X<sep>
+
+The chars used to separate fields, by default undefined. Limited to 8 bytes.
+
+When set, overrules L<C<sep_char>|/sep_char>.  If its length is one byte it
+acts as an alias to L<C<sep_char>|/sep_char>.
 
 See also L</CAVEATS>
 
@@ -1505,6 +1554,7 @@ is equivalent to
      quote_char            => '"',
      escape_char           => '"',
      sep_char              => ',',
+     sep                   => undef,
      eol                   => $\,
      always_quote          => 0,
      quote_space           => 1,
@@ -2516,6 +2566,11 @@ setting in it, so checking the locale is no solution.
 
 =over 2
 
+=item Multibyte quotation
+
+Currently L<C<quote_char>|/quote_char> is restricted to a single byte. Like
+L<C<sep>|/sep> it ought to support multi-byte and UTF-8 quotation.
+
 =item More Errors & Warnings
 
 New extensions ought to be  clear and concise  in reporting what  error has
@@ -2592,9 +2647,13 @@ No guarantees, but this is what I had in mind some time ago:
 
 =over 2
 
-=item next
+=item *
 
- - DIAGNOSTICS section in pod to *describe* the errors (see below)
+DIAGNOSTICS section in pod to *describe* the errors (see below)
+
+=item *
+
+Multi-byte quotation support
 
 =back
 
