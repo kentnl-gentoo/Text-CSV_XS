@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.10";
+$VERSION   = "1.11";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -53,27 +53,26 @@ sub version
 #   a newly created Text::CSV object.
 
 my %def_attr = (
+    eol				=> '',
+    sep_char			=> ',',
     quote_char			=> '"',
     escape_char			=> '"',
-    sep_char			=> ',',
-    eol				=> '',
-    sep				=> undef,
+    binary			=> 0,
+    decode_utf8			=> 1,
+    auto_diag			=> 0,
+    diag_verbose		=> 0,
+    blank_is_undef		=> 0,
+    empty_is_undef		=> 0,
+    allow_whitespace		=> 0,
+    allow_loose_quotes		=> 0,
+    allow_loose_escapes		=> 0,
+    allow_unquoted_escape	=> 0,
     always_quote		=> 0,
     quote_space			=> 1,
     quote_null			=> 1,
     quote_binary		=> 1,
-    binary			=> 0,
-    decode_utf8			=> 1,
     keep_meta_info		=> 0,
-    allow_loose_quotes		=> 0,
-    allow_loose_escapes		=> 0,
-    allow_unquoted_escape	=> 0,
-    allow_whitespace		=> 0,
-    blank_is_undef		=> 0,
-    empty_is_undef		=> 0,
     verbatim			=> 0,
-    auto_diag			=> 0,
-    diag_verbose		=> 0,
     types			=> undef,
     callbacks			=> undef,
 
@@ -98,20 +97,37 @@ my $last_new_err = Text::CSV_XS->SetDiag (0);
 sub _unhealthy_whitespace
 {
     my $self = shift;
-    $_[0] and
-      (defined $self->{quote_char}  && $self->{quote_char}  =~ m/^[ \t]$/) ||
-      (defined $self->{escape_char} && $self->{escape_char} =~ m/^[ \t]$/) and
+    $_[0] or return 0; # no checks needed without allow_whitespace
+
+    my $quo = $self->{quote};
+    defined $quo && length ($quo) or $quo = $self->{quote_char};
+    my $esc = $self->{escape_char};
+
+    (defined $quo && $quo =~ m/^[ \t]/) || (defined $esc && $esc =~ m/^[ \t]/) and
 	return 1002;
+
     return 0;
     } # _sane_whitespace
 
 sub _check_sanity
 {
     my $self = shift;
-    for (qw( sep_char quote_char escape_char )) {
-	defined $self->{$_} && $self->{$_} =~ m/[\r\n]/ and
-	    return 1003;
-	}
+
+    my $sep = $self->{sep};
+    defined $sep && length ($sep) or $sep = $self->{sep_char};
+    my $quo = $self->{quote};
+    defined $quo && length ($quo) or $quo = $self->{quote_char};
+    my $esc = $self->{escape_char};
+
+#    use DP;::diag ("SEP: '", DPeek ($sep),
+#	        "', QUO: '", DPeek ($quo),
+#	        "', ESC: '", DPeek ($esc),"'");
+    # sep_char cannot be undefined
+    defined $quo && $quo eq $sep  and return 1001;
+    defined $esc && $esc eq $sep  and return 1001;
+
+    defined $_ && $_ =~ m/[\r\n]/ and return 1003 for $sep, $quo, $esc;
+
     return _unhealthy_whitespace ($self, $self->{allow_whitespace});
     } # _check_sanity
 
@@ -135,6 +151,11 @@ sub new
 	$attr{sep_char} = delete $attr{sep};
 	$sep_aliased = 1;
 	}
+    my $quote_aliased = 0;
+    if (defined $attr{quote}) {
+	$attr{quote_char} = delete $attr{quote};
+	$quote_aliased = 1;
+	}
     for (keys %attr) {
 	if (m/^[a-z]/ && exists $def_attr{$_}) {
 	    # uncoverable condition false
@@ -155,6 +176,16 @@ sub new
 	    }
 	else {
 	    $attr{sep} = undef;
+	    }
+	}
+    if ($quote_aliased) {
+	my @b = unpack "U0C*", $attr{quote_char};
+	if (@b > 1) {
+	    $attr{quote} = $attr{quote_char};
+	    $attr{quote_char} = "\0";
+	    }
+	else {
+	    $attr{quote} = undef;
 	    }
 	}
 
@@ -190,7 +221,8 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     allow_unquoted_escape	=>  8,
     allow_whitespace		=>  9,
     blank_is_undef		=> 10,
-    eol				=> 11,	# 11 .. 18
+    eol				=> 11,
+    quote			=> 15,
     verbatim			=> 22,
     empty_is_undef		=> 23,
     auto_diag			=> 24,
@@ -237,9 +269,38 @@ sub _set_attr_N
 sub quote_char
 {
     my $self = shift;
-    @_ and $self->_set_attr_C ("quote_char",  shift);
+    if (@_) {
+	$self->_set_attr_C ("quote_char", shift);
+	$self->_cache_set ($_cache_id{quote}, "");
+	}
     $self->{quote_char};
     } # quote_char
+
+sub quote
+{
+    my $self = shift;
+    if (@_) {
+	my $quote = shift;
+	defined $quote or $quote = "";
+	$] >= 5.008002 and utf8::decode ($quote);
+	my @b = unpack "U0C*", $quote;
+	if (@b > 1) {
+	    $self->quote_char ("\0");
+	    }
+	else {
+	    $self->quote_char ($quote);
+	    $quote = "";
+	    }
+	$self->{quote} = $quote;
+
+	my $ec = _check_sanity ($self);
+	$ec and croak ($self->SetDiag ($ec));
+
+	$self->_cache_set ($_cache_id{quote}, $quote);
+	}
+    my $quote = $self->{quote};
+    defined $quote && length ($quote) ? $quote : $self->{quote_char};
+    } # quote
 
 sub escape_char
 {
@@ -274,6 +335,10 @@ sub sep
 	    $sep = "";
 	    }
 	$self->{sep} = $sep;
+
+	my $ec = _check_sanity ($self);
+	$ec and croak ($self->SetDiag ($ec));
+
 	$self->_cache_set ($_cache_id{sep}, $sep);
 	}
     my $sep = $self->{sep};
@@ -852,6 +917,8 @@ sub _csv_attr
     my $in  = delete $attr{in}  || delete $attr{file} or croak $csv_usage;
     my $out = delete $attr{out} || delete $attr{file};
 
+    ref $in eq "CODE" || ref $in eq "ARRAY" and $out ||= \*STDOUT;
+
     if ($out) {
 	$in or croak $csv_usage;	# No out without in
 	defined $attr{eol} or $attr{eol} = "\r\n";
@@ -864,11 +931,8 @@ sub _csv_attr
 	    }
 	}
 
-    if (   ref $in eq "CODE") {		# we need an out
-	$out or croak qq{for CSV source, "out" is required};
-	}
-    elsif (ref $in eq "ARRAY") {	# we need an out
-	$out or croak qq{for CSV source, "out" is required};
+    if (   ref $in eq "CODE" or ref $in eq "ARRAY") {
+	# All done
 	}
     elsif (ref $in eq "SCALAR") {
 	# Strings with code points over 0xFF may not be mapped into in-memory file handles
@@ -892,6 +956,7 @@ sub _csv_attr
 
     my $hdrs = delete $attr{headers};
     my $frag = delete $attr{fragment};
+    my $key  = delete $attr{key};
 
     my $cbai = delete $attr{callbacks}{after_in}    ||
 	       delete $attr{after_in}               ||
@@ -912,6 +977,7 @@ sub _csv_attr
 	in   => $in,
 	out  => $out,
 	hdrs => $hdrs,
+	key  => $key,
 	frag => $frag,
 	cbai => $cbai,
 	cbbo => $cbbo,
@@ -971,6 +1037,7 @@ sub csv
 
     ref $in eq "CODE" and croak "CODE only valid fro in when using out";
 
+    my $key = $c->{key} and $hdrs ||= "auto";
     if (defined $hdrs && !ref $hdrs) {
 	$hdrs eq "skip" and         $csv->getline ($fh);
 	$hdrs eq "auto" and $hdrs = $csv->getline ($fh);
@@ -981,10 +1048,13 @@ sub csv
 	? # aoh
 	  do {
 	    $csv->column_names ($hdrs);
-	    $frag ? $csv->fragment ($fh, $frag) : $csv->getline_hr_all ($fh);
+	    $frag ? $csv->fragment ($fh, $frag) :
+	    $key  ? { map { $_->{$key} => $_ } @{$csv->getline_hr_all ($fh)} }
+		  : $csv->getline_hr_all ($fh);
 	    }
 	: # aoa
-	    $frag ? $csv->fragment ($fh, $frag) : $csv->getline_all ($fh);
+	    $frag ? $csv->fragment ($fh, $frag)
+		  : $csv->getline_all ($fh);
     $ref or Text::CSV_XS->auto_diag;
     $c->{cls} and close $fh;
     if ($ref and $c->{cbai} || $c->{cboi}) {
@@ -1215,6 +1285,10 @@ The following attributes are available:
 =item eol
 X<eol>
 
+ my $csv = Text::CSV_XS->new ({ eol => $/ });
+           $csv->eol (undef);
+ my $eol = $csv->eol;
+
 The end-of-line string to add to rows for L</print> or the record separator
 for L</getline>.
 
@@ -1236,6 +1310,10 @@ only a Carriage Return without Line Feed, will be L</parse>d correct.
 =item sep_char
 X<sep_char>
 
+ my $csv = Text::CSV_XS->new ({ sep_char => ";" });
+         $csv->sep_char (";");
+ my $c = $csv->sep_char;
+
 The char used to separate fields, by default a comma. (C<,>).  Limited to a
 single-byte character, usually in the range from C<0x20> (space) to C<0x7E>
 (tilde). When longer sequences are required, use L<C<sep>|/sep>.
@@ -1248,6 +1326,10 @@ See also L</CAVEATS>
 =item sep
 X<sep>
 
+ my $csv = Text::CSV_XS->new ({ sep => "\N{FULLWIDTH COMMA}" });
+           $csv->sep (";");
+ my $sep = $csv->sep;
+
 The chars used to separate fields, by default undefined. Limited to 8 bytes.
 
 When set, overrules L<C<sep_char>|/sep_char>.  If its length is one byte it
@@ -1255,8 +1337,181 @@ acts as an alias to L<C<sep_char>|/sep_char>.
 
 See also L</CAVEATS>
 
+=item quote_char
+X<quote_char>
+
+ my $csv = Text::CSV_XS->new ({ quote_char => "'" });
+         $csv->quote_char (undef);
+ my $c = $csv->quote_char;
+
+The character to quote fields containing blanks or binary data,  by default
+the double quote character (C<">).  A value of undef suppresses quote chars
+(for simple cases only). Limited to a single-byte character, usually in the
+range from  C<0x20> (space) to  C<0x7E> (tilde).  When longer sequences are
+required, use L<C<quote>|/quote>.
+
+C<quote_char> can not be equal to L<C<sep_char>|/sep_char>.
+
+=item quote
+X<quote>
+
+ my $csv = Text::CSV_XS->new ({ quote => "\N{FULLWIDTH QUOTATION MARK}" });
+             $csv->quote ("'");
+ my $quote = $csv->quote;
+
+The chars used to quote fields, by default undefined. Limited to 8 bytes.
+
+When set, overrules L<C<quote_char>|/quote_char>. If its length is one byte
+it acts as an alias to L<C<quote_char>|/quote_char>.
+
+See also L</CAVEATS>
+
+=item escape_char
+X<escape_char>
+
+ my $csv = Text::CSV_XS->new ({ escape_char => "\\" });
+         $csv->escape_char (undef);
+ my $c = $csv->escape_char;
+
+The character to  escape  certain characters inside quoted fields.  This is
+limited to a  single-byte  character,  usually  in the  range from  C<0x20>
+(space) to C<0x7E> (tilde).
+
+The C<escape_char> defaults to being the double-quote mark (C<">). In other
+words the same as the default L<C<quote_char>|/quote_char>. This means that
+doubling the quote mark in a field escapes it:
+
+ "foo","bar","Escape ""quote mark"" with two ""quote marks""","baz"
+
+If  you  change  the   L<C<quote_char>|/quote_char>  without  changing  the
+C<escape_char>,  the  C<escape_char> will still be the double-quote (C<">).
+If instead you want to escape the  L<C<quote_char>|/quote_char> by doubling
+it you will need to also change the  C<escape_char>  to be the same as what
+you have changed the L<C<quote_char>|/quote_char> to.
+
+The escape character can not be equal to the separation character.
+
+=item binary
+X<binary>
+
+ my $csv = Text::CSV_XS->new ({ binary => 1 });
+         $csv->binary (0);
+ my $f = $csv->binary;
+
+If this attribute is C<1>,  you may use binary characters in quoted fields,
+including line feeds, carriage returns and C<NULL> bytes. (The latter could
+be escaped as C<"0>.) By default this feature is off.
+
+If a string is marked UTF8,  C<binary> will be turned on automatically when
+binary characters other than C<CR> and C<NL> are encountered.   Note that a
+simple string like C<"\x{00a0}"> might still be binary, but not marked UTF8,
+so setting C<< { binary => 1 } >> is still a wise option.
+
+=item decode_utf8
+X<decode_utf8>
+
+ my $csv = Text::CSV_XS->new ({ decode_utf8 => 1 });
+         $csv->decode_utf8 (0);
+ my $f = $csv->decode_utf8;
+
+This attributes defaults to TRUE.
+
+While I<parsing>,  fields that are valid UTF-8, are automatically set to be
+UTF-8, so that
+
+  $csv->parse ("\xC4\xA8\n");
+
+results in
+
+  PV("\304\250"\0) [UTF8 "\x{128}"]
+
+Sometimes it might not be a desired action.  To prevent those upgrades, set
+this attribute to false, and the result will be
+
+  PV("\304\250"\0)
+
+=item auto_diag
+X<auto_diag>
+
+ my $csv = Text::CSV_XS->new ({ auto_diag => 1 });
+         $csv->auto_diag (2);
+ my $l = $csv->auto_diag;
+
+Set this attribute to a number between C<1> and C<9> causes  L</error_diag>
+to be automatically called in void context upon errors.
+
+In case of error C<2012 - EOF>, this call will be void.
+
+If C<auto_diag> is set to a numeric value greater than C<1>, it will C<die>
+on errors instead of C<warn>.  If set to anything unrecognized,  it will be
+silently ignored.
+
+Future extensions to this feature will include more reliable auto-detection
+of  C<autodie>  being active in the scope of which the error occurred which
+will increment the value of C<auto_diag> with  C<1> the moment the error is
+detected.
+
+=item diag_verbose
+X<diag_verbose>
+
+ my $csv = Text::CSV_XS->new ({ diag_verbose => 1 });
+         $csv->diag_verbose (2);
+ my $l = $csv->diag_verbose;
+
+Set the verbosity of the output triggered by C<auto_diag>.   Currently only
+adds the current  input-record-number  (if known)  to the diagnostic output
+with an indication of the position of the error.
+
+=item blank_is_undef
+X<blank_is_undef>
+
+ my $csv = Text::CSV_XS->new ({ blank_is_undef => 1 });
+         $csv->blank_is_undef (0);
+ my $f = $csv->blank_is_undef;
+
+Under normal circumstances, C<CSV> data makes no distinction between quoted-
+and unquoted empty fields.  These both end up in an empty string field once
+read, thus
+
+ 1,"",," ",2
+
+is read as
+
+ ("1", "", "", " ", "2")
+
+When I<writing> C<CSV> files with L<C<always_quote>|/always_quote> set, the
+unquoted I<empty> field is the result of an undefined value. To enable this
+distinction when I<reading> C<CSV> data,  the  C<blank_is_undef>  attribute
+will cause unquoted empty fields to be set to  C<undef>,  causing the above
+to be parsed as
+
+ ("1", "", undef, " ", "2")
+
+=item empty_is_undef
+X<empty_is_undef>
+
+ my $csv = Text::CSV_XS->new ({ empty_is_undef => 1 });
+         $csv->empty_is_undef (0);
+ my $f = $csv->empty_is_undef;
+
+Going one  step  further  than  L<C<blank_is_undef>|/blank_is_undef>,  this
+attribute converts all empty fields to C<undef>, so
+
+ 1,"",," ",2
+
+is read as
+
+ (1, undef, undef, " ", 2)
+
+Note that this effects only fields that are  originally  empty,  not fields
+that are empty after stripping allowed whitespace. YMMV.
+
 =item allow_whitespace
 X<allow_whitespace>
+
+ my $csv = Text::CSV_XS->new ({ allow_whitespace => 1 });
+         $csv->allow_whitespace (0);
+ my $f = $csv->allow_whitespace;
 
 When this option is set to true,  the whitespace  (C<TAB>'s and C<SPACE>'s)
 surrounding  the  separation character  is removed when parsing.  If either
@@ -1282,54 +1537,12 @@ will now be parsed as
 
 even if the original line was perfectly acceptable C<CSV>.
 
-=item blank_is_undef
-X<blank_is_undef>
-
-Under normal circumstances, C<CSV> data makes no distinction between quoted-
-and unquoted empty fields.  These both end up in an empty string field once
-read, thus
-
- 1,"",," ",2
-
-is read as
-
- ("1", "", "", " ", "2")
-
-When I<writing> C<CSV> files with L<C<always_quote>|/always_quote> set, the
-unquoted I<empty> field is the result of an undefined value. To enable this
-distinction when I<reading> C<CSV> data,  the  C<blank_is_undef>  attribute
-will cause unquoted empty fields to be set to  C<undef>,  causing the above
-to be parsed as
-
- ("1", "", undef, " ", "2")
-
-=item empty_is_undef
-X<empty_is_undef>
-
-Going one  step  further  than  L<C<blank_is_undef>|/blank_is_undef>,  this
-attribute converts all empty fields to C<undef>, so
-
- 1,"",," ",2
-
-is read as
-
- (1, undef, undef, " ", 2)
-
-Note that this effects only fields that are  originally  empty,  not fields
-that are empty after stripping allowed whitespace. YMMV.
-
-=item quote_char
-X<quote_char>
-
-The character to quote fields containing blanks or binary data,  by default
-the double quote character (C<">).  A value of undef suppresses quote chars
-(for simple cases only). Limited to a single-byte character, usually in the
-range from C<0x20> (space) to C<0x7E> (tilde).
-
-C<quote_char> can not be equal to L<C<sep_char>|/sep_char>.
-
 =item allow_loose_quotes
 X<allow_loose_quotes>
+
+ my $csv = Text::CSV_XS->new ({ allow_loose_quotes => 1 });
+         $csv->allow_loose_quotes (0);
+ my $f = $csv->allow_loose_quotes;
 
 By default, parsing unquoted fields containing L<C<quote_char>|/quote_char>
 characters like
@@ -1353,29 +1566,12 @@ quoted field as-is.  This can be achieved by setting  C<allow_loose_quotes>
 B<AND> making sure that the L<C<escape_char>|/escape_char> is  I<not> equal
 to L<C<quote_char>|/quote_char>.
 
-=item escape_char
-X<escape_char>
-
-The character to  escape  certain characters inside quoted fields.  This is
-limited to a  single-byte  character,  usually  in the  range from  C<0x20>
-(space) to C<0x7E> (tilde).
-
-The C<escape_char> defaults to being the double-quote mark (C<">). In other
-words the same as the default L<C<quote_char>|/quote_char>. This means that
-doubling the quote mark in a field escapes it:
-
- "foo","bar","Escape ""quote mark"" with two ""quote marks""","baz"
-
-If  you  change  the   L<C<quote_char>|/quote_char>  without  changing  the
-C<escape_char>,  the  C<escape_char> will still be the double-quote (C<">).
-If instead you want to escape the  L<C<quote_char>|/quote_char> by doubling
-it you will need to also change the  C<escape_char>  to be the same as what
-you have changed the L<C<quote_char>|/quote_char> to.
-
-The escape character can not be equal to the separation character.
-
 =item allow_loose_escapes
 X<allow_loose_escapes>
+
+ my $csv = Text::CSV_XS->new ({ allow_loose_escapes => 1 });
+         $csv->allow_loose_escapes (0);
+ my $f = $csv->allow_loose_escapes;
 
 Parsing fields  that  have  L<C<escape_char>|/escape_char>  characters that
 escape characters that do not need to be escaped, like:
@@ -1390,6 +1586,10 @@ equal.
 =item allow_unquoted_escape
 X<allow_unquoted_escape>
 
+ my $csv = Text::CSV_XS->new ({ allow_unquoted_escape => 1 });
+         $csv->allow_unquoted_escape (0);
+ my $f = $csv->allow_unquoted_escape;
+
 A backward compatibility issue where L<C<escape_char>|/escape_char> differs
 from L<C<quote_char>|/quote_char>  prevents  L<C<escape_char>|/escape_char>
 to be in the first position of a field.  If L<C<quote_char>|/quote_char> is
@@ -1401,45 +1601,12 @@ this would be illegal:
 Setting this attribute to C<1>  might help to overcome issues with backward
 compatibility and allow this style.
 
-=item binary
-X<binary>
-
-If this attribute is C<1>,  you may use binary characters in quoted fields,
-including line feeds, carriage returns and C<NULL> bytes. (The latter could
-be escaped as C<"0>.) By default this feature is off.
-
-If a string is marked UTF8,  C<binary> will be turned on automatically when
-binary characters other than C<CR> and C<NL> are encountered.   Note that a
-simple string like C<"\x{00a0}"> might still be binary, but not marked UTF8,
-so setting C<< { binary => 1 } >> is still a wise option.
-
-=item decode_utf8
-X<decode_utf8>
-
-This attributes defaults to TRUE.
-
-While I<parsing>,  fields that are valid UTF-8, are automatically set to be
-UTF-8, so that
-
-  $csv->parse ("\xC4\xA8\n");
-
-results in
-
-  PV("\304\250"\0) [UTF8 "\x{128}"]
-
-Sometimes it might not be a desired action.  To prevent those upgrades, set
-this attribute to false, and the result will be
-
-  PV("\304\250"\0)
-
-=item types
-X<types>
-
-A set of column types; the attribute is immediately passed to the L</types>
-method.
-
 =item always_quote
 X<always_quote>
+
+ my $csv = Text::CSV_XS->new ({ always_quote => 1 });
+         $csv->always_quote (0);
+ my $f = $csv->always_quote;
 
 By default the generated fields are quoted only if they I<need> to be.  For
 example, if they contain the separator character. If you set this attribute
@@ -1451,6 +1618,10 @@ use Text::CSV_XS. :)
 =item quote_space
 X<quote_space>
 
+ my $csv = Text::CSV_XS->new ({ quote_space => 1 });
+         $csv->quote_space (0);
+ my $f = $csv->quote_space;
+
 By default,  a space in a field would trigger quotation.  As no rule exists
 this to be forced in C<CSV>,  nor any for the opposite, the default is true
 for safety.   You can exclude the space  from this trigger  by setting this
@@ -1458,6 +1629,10 @@ attribute to 0.
 
 =item quote_null
 X<quote_null>
+
+ my $csv = Text::CSV_XS->new ({ quote_null => 1 });
+         $csv->quote_null (0);
+ my $f = $csv->quote_null;
 
 By default, a C<NULL> byte in a field would be escaped. This option enables
 you to treat the  C<NULL>  byte as a simple binary character in binary mode
@@ -1467,12 +1642,20 @@ C<NULL> escapes by setting this attribute to C<0>.
 =item quote_binary
 X<quote_binary>
 
+ my $csv = Text::CSV_XS->new ({ quote_binary => 1 });
+         $csv->quote_binary (0);
+ my $f = $csv->quote_binary;
+
 By default,  all "unsafe" bytes inside a string cause the combined field to
 be quoted.  By setting this attribute to C<0>, you can disable that trigger
 for bytes >= C<0x7F>.
 
 =item keep_meta_info
 X<keep_meta_info>
+
+ my $csv = Text::CSV_XS->new ({ keep_meta_info => 1 });
+         $csv->keep_meta_info (0);
+ my $f = $csv->keep_meta_info;
 
 By default, the parsing of input records is as simple and fast as possible.
 However,  some parsing information - like quotation of the original field -
@@ -1482,6 +1665,10 @@ and L</is_binary> described below.  Default is false for performance.
 
 =item verbatim
 X<verbatim>
+
+ my $csv = Text::CSV_XS->new ({ verbatim => 1 });
+         $csv->verbatim (0);
+ my $f = $csv->verbatim;
 
 This is a quite controversial attribute to set,  but makes some hard things
 possible.
@@ -1513,29 +1700,10 @@ a binary character.
 For L</parse> this means that the parser has no more idea about line ending
 and L</getline> C<chomp>s line endings on reading.
 
-=item auto_diag
-X<auto_diag>
+=item types
 
-Set this attribute to a number between C<1> and C<9> causes  L</error_diag>
-to be automatically called in void context upon errors.
-
-In case of error C<2012 - EOF>, this call will be void.
-
-If C<auto_diag> is set to a numeric value greater than C<1>, it will C<die>
-on errors instead of C<warn>.  If set to anything unrecognized,  it will be
-silently ignored.
-
-Future extensions to this feature will include more reliable auto-detection
-of  C<autodie>  being active in the scope of which the error occurred which
-will increment the value of C<auto_diag> with  C<1> the moment the error is
-detected.
-
-=item diag_verbose
-X<diag_verbose>
-
-Set the verbosity of the output triggered by C<auto_diag>.   Currently only
-adds the current  input-record-number  (if known)  to the diagnostic output
-with an indication of the position of the error.
+A set of column types; the attribute is immediately passed to the L</types>
+method.
 
 =item callbacks
 X<callbacks>
@@ -1551,27 +1719,29 @@ To sum it up,
 is equivalent to
 
  $csv = Text::CSV_XS->new ({
-     quote_char            => '"',
-     escape_char           => '"',
+     eol                   => undef, # \r, \n, or \r\n
      sep_char              => ',',
      sep                   => undef,
-     eol                   => $\,
+     quote_char            => '"',
+     quote                 => undef,
+     escape_char           => '"',
+     binary                => 0,
+     decode_utf8           => 1,
+     auto_diag             => 0,
+     diag_verbose          => 0,
+     blank_is_undef        => 0,
+     empty_is_undef        => 0,
+     allow_whitespace      => 0,
+     allow_loose_quotes    => 0,
+     allow_loose_escapes   => 0,
+     allow_unquoted_escape => 0,
      always_quote          => 0,
      quote_space           => 1,
      quote_null	           => 1,
      quote_binary          => 1,
-     binary                => 0,
-     decode_utf8           => 1,
      keep_meta_info        => 0,
-     allow_loose_quotes    => 0,
-     allow_loose_escapes   => 0,
-     allow_unquoted_escape => 0,
-     allow_whitespace      => 0,
-     blank_is_undef        => 0,
-     empty_is_undef        => 0,
      verbatim              => 0,
-     auto_diag             => 0,
-     diag_verbose          => 0,
+     types                 => undef,
      callbacks             => undef,
      });
 
@@ -1625,6 +1795,18 @@ A short benchmark
  $csv->print ($io, [ @data ]);   # 11800 recs/sec
  $csv->print ($io,  \@data  );   # 57600 recs/sec
  $csv->print ($io,   undef  );   # 48500 recs/sec
+
+=head2 print_hr
+X<print_hr>
+
+ $csv->print_hr ($io, $ref);
+
+Provides an easy way  to print a  C<$ref>  (as fetched with L</getline_hr>)
+provided the column names are set with L</column_names>.
+
+It is just a wrapper method with basic parameter checks over
+
+ $csv->print ($io, [ map { $ref->{$_} } $csv->column_names ]);
 
 =head2 combine
 X<combine>
@@ -1687,21 +1869,6 @@ Given a CSV file with 10 lines:
  8..9  $csv->getline_all ($io, -2)     # last 2 rows
  6..7  $csv->getline_all ($io, -4,  2) # first 2 of last  4 rows
 
-=head2 parse
-X<parse>
-
- $status = $csv->parse ($line);
-
-This method decomposes a  C<CSV>  string into fields,  returning success or
-failure.   Failure can result from a lack of argument  or the given  C<CSV>
-string is improperly formatted.   Upon success, L</fields> can be called to
-retrieve the decomposed fields. Upon failure calling L</fields> will return
-undefined data and  L</error_input>  can be called to retrieve  the invalid
-argument.
-
-You may use the L</types>  method for setting column types.  See L</types>'
-description below.
-
 =head2 getline_hr
 X<getline_hr>
 
@@ -1751,17 +1918,20 @@ X<getline_hr_all>
 This will return a reference to a list of   L<getline_hr ($io)|/getline_hr>
 results.  In this call, L<C<keep_meta_info>|/keep_meta_info> is disabled.
 
-=head2 print_hr
-X<print_hr>
+=head2 parse
+X<parse>
 
- $csv->print_hr ($io, $ref);
+ $status = $csv->parse ($line);
 
-Provides an easy way  to print a  C<$ref>  (as fetched with L</getline_hr>)
-provided the column names are set with L</column_names>.
+This method decomposes a  C<CSV>  string into fields,  returning success or
+failure.   Failure can result from a lack of argument  or the given  C<CSV>
+string is improperly formatted.   Upon success, L</fields> can be called to
+retrieve the decomposed fields. Upon failure calling L</fields> will return
+undefined data and  L</error_input>  can be called to retrieve  the invalid
+argument.
 
-It is just a wrapper method with basic parameter checks over
-
- $csv->print ($io, [ map { $ref->{$_} } $csv->column_names ]);
+You may use the L</types>  method for setting column types.  See L</types>'
+description below.
 
 =head2 fragment
 X<fragment>
@@ -2210,6 +2380,43 @@ instead
  my $aoh = csv (in => $fh, headers => [qw( Foo Bar )]);
  csv (in => $aoa, out => $fh, headers => [qw( code description price }]);
 
+=head3 key
+X<key>
+
+If passed,  will default  L<C<headers>|/headers>  to C<"auto"> and return a
+hashref instead of an array of hashes.
+
+ my $ref = csv (in => "test.csv", key => "code");
+
+with test.csv like
+
+ code,product,price,color
+ 1,pc,850,gray
+ 2,keyboard,12,white
+ 3,mouse,5,black
+
+will return
+
+  { 1   => {
+        code    => 1,
+        color   => 'gray',
+        price   => 850,
+        product => 'pc'
+        },
+    2   => {
+        code    => 2,
+        color   => 'white',
+        price   => 12,
+        product => 'keyboard'
+        },
+    3   => {
+        code    => 3,
+        color   => 'black',
+        price   => 5,
+        product => 'mouse'
+        }
+    }
+
 =head3 fragment
 X<fragment>
 
@@ -2565,11 +2772,6 @@ setting in it, so checking the locale is no solution.
 =head1 TODO
 
 =over 2
-
-=item Multibyte quotation
-
-Currently L<C<quote_char>|/quote_char> is restricted to a single byte. Like
-L<C<sep>|/sep> it ought to support multi-byte and UTF-8 quotation.
 
 =item More Errors & Warnings
 

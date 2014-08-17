@@ -30,6 +30,7 @@
 
 #define MAX_SEP_LEN	16
 #define MAX_EOL_LEN	16
+#define MAX_QUO_LEN	16
 
 #define CSV_FLAGS_QUO		0x0001
 #define CSV_FLAGS_BIN		0x0002
@@ -48,6 +49,8 @@
 #define CH_EOLX		1215
 #define CH_SEPX		8888
 #define CH_SEP		*csv->sep
+#define CH_QUOTEX	8889
+#define CH_QUOTE	*csv->quo
 
 #define useIO_EOF	0x10
 
@@ -84,8 +87,10 @@
 #define CACHE_ID_sep			38
 #define CACHE_ID_sep_len		37
 #define CACHE_ID_eol			11
-#define CACHE_ID_eol_len		19
-#define CACHE_ID_eol_is_cr		20
+#define CACHE_ID_eol_len		12
+#define CACHE_ID_eol_is_cr		13
+#define CACHE_ID_quo			15
+#define CACHE_ID_quo_len		16
 #define CACHE_ID_verbatim		22
 #define CACHE_ID_empty_is_undef		23
 #define CACHE_ID_auto_diag		24
@@ -140,8 +145,10 @@ typedef struct {
     SV *	bound;
 
     char *	types;
+
     byte	eol_len;
     byte	sep_len;
+    byte	quo_len;
     byte	types_len;
 
     char *	bptr;
@@ -154,6 +161,7 @@ typedef struct {
     STRLEN	used;
     byte	eol[MAX_EOL_LEN];
     byte	sep[MAX_SEP_LEN];
+    byte	quo[MAX_QUO_LEN];
     char	buffer[BUFFER_SIZE];
     } csv_t;
 
@@ -226,24 +234,46 @@ static SV  *m_getline, *m_print, *m_read;
 static int  last_error = 0;
 
 #define __is_SEPX(c) (c == CH_SEP && (csv->sep_len == 0 || (\
-    csv->size - csv->used >= csv->sep_len				&&\
+    csv->size - csv->used >= csv->sep_len - 1				&&\
     !memcmp (csv->bptr + csv->used, csv->sep + 1, csv->sep_len - 1)	&&\
     (csv->used += csv->sep_len - 1)					&&\
     (c = CH_SEPX))))
 #if MAINT_DEBUG > 1
-static byte _is_SEPX (byte c, csv_t *csv, int line)
+static byte _is_SEPX (unsigned int c, csv_t *csv, int line)
 {
-    byte b = __is_SEPX (c);
-    (void)fprintf (stderr, "# SEPX: %d\n", b);
-    if (csv->sep_len) {
-	(void)fprintf (stderr, "# %d: len: %d, siz: %d, usd: %d, c: %02x, *sep: %02x\n",
-	    line, csv->sep_len, csv->size, csv->used, c, CH_SEP);
-	}
+    unsigned int b = __is_SEPX (c);
+    (void)fprintf (stderr, "# %4d - is_SEPX:\t%d (%d)\n", line, b, csv->sep_len);
+    if (csv->sep_len)
+	(void)fprintf (stderr,
+	    "# len: %d, siz: %d, usd: %d, c: %02x, *sep: %02x\n",
+	    csv->sep_len, csv->size, csv->used, c, CH_SEP);
     return b;
     } /* _is_SEPX */
 #define is_SEP(c)  _is_SEPX (c, csv, __LINE__)
 #else
 #define is_SEP(c) __is_SEPX (c)
+#endif
+
+#define __is_QUOTEX(c) (CH_QUOTE && c == CH_QUOTE && (csv->quo_len == 0 || (\
+    csv->size - csv->used >= csv->quo_len - 1				&&\
+    !memcmp (csv->bptr + csv->used, csv->quo + 1, csv->quo_len - 1)	&&\
+    (csv->used += csv->quo_len - 1)					&&\
+    (c = CH_QUOTEX))))
+#if MAINT_DEBUG > 1
+static byte _is_QUOTEX (unsigned int c, csv_t *csv, int line)
+{
+    unsigned int b = __is_QUOTEX (c);
+    (void)fprintf (stderr, "# %4d - is_QUOTEX:\t%d (%d)\n", line, b, csv->quo_len);
+
+    if (csv->quo_len)
+	(void)fprintf (stderr,
+	    "# len: %d, siz: %d, usd: %d, c: %02x, *quo: %02x\n",
+	    csv->quo_len, csv->size, csv->used, c, CH_QUOTE);
+    return b;
+    } /* _is_QUOTEX */
+#define is_QUOTE(c)  _is_QUOTEX (c, csv, __LINE__)
+#else
+#define is_QUOTE(c) __is_QUOTEX (c)
 #endif
 
 #define require_IO_Handle \
@@ -257,7 +287,7 @@ static byte _is_SEPX (byte c, csv_t *csv, int line)
 
 #define is_whitespace(ch) \
     ( (ch) != CH_SEP           && \
-      (ch) != csv->quote_char  && \
+      (ch) != CH_QUOTE         && \
       (ch) != csv->escape_char && \
     ( (ch) == CH_SPACE || \
       (ch) == CH_TAB \
@@ -292,6 +322,8 @@ static SV *cx_SetDiag (pTHX_ csv_t *csv, int xse)
 	(void)hv_store (csv->self, "_ERROR_INPUT", 12, &PL_sv_undef, 0);
 	csv->has_error_input = 0;
 	}
+    if (xse == 2012) /* EOF */
+	(void)hv_store (csv->self, "_EOF",          4, &PL_sv_yes,   0);
     if (csv->pself && csv->auto_diag) {
 	ENTER;
 	SAVETMPS;
@@ -341,7 +373,11 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 	    csv->sep_len		= 0;
 	    break;
 
-	case CACHE_ID_quote_char:            csv->quote_char            = *cp; break;
+	case CACHE_ID_quote_char:
+	    CH_QUOTE			= *cp;
+	    csv->quo_len		= 0;
+	    break;
+
 	case CACHE_ID_escape_char:           csv->escape_char           = *cp; break;
 
 	/* boolean/numeric */
@@ -372,6 +408,13 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 	    if (len < MAX_SEP_LEN) {
 		memcpy (csv->sep, cp, len);
 		csv->sep_len = len == 1 ? 0 : len;
+		}
+	    break;
+
+	case CACHE_ID_quo:
+	    if (len < MAX_QUO_LEN) {
+		memcpy (csv->quo, cp, len);
+		csv->quo_len = len == 1 ? 0 : len;
 		}
 	    break;
 
@@ -422,7 +465,7 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     cache = (byte *)SvPV_nolen (*svp);
     memcpy (csv, cache, sizeof (csv_t));
     warn ("CACHE:\n");
-    _cache_show_char ("quote_char",		csv->quote_char);
+    _cache_show_char ("quote_char",		CH_QUOTE);
     _cache_show_char ("escape_char",		csv->escape_char);
     _cache_show_char ("sep_char",		CH_SEP);
     _cache_show_byte ("binary",			csv->binary);
@@ -452,6 +495,9 @@ static void cx_xs_cache_diag (pTHX_ HV *hv)
     _cache_show_byte ("sep_len",		csv->sep_len);
     if (csv->sep_len > 1)
 	_cache_show_str ("sep", csv->sep_len,	csv->sep);
+    _cache_show_byte ("quo_len",		csv->quo_len);
+    if (csv->quo_len > 1)
+	_cache_show_str ("quote", csv->quo_len,	csv->quo);
     } /* xs_cache_diag */
 
 #define set_eol_is_cr(csv)	cx_set_eol_is_cr (aTHX_ csv)
@@ -486,14 +532,34 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	csv->self  = self;
 	csv->pself = pself;
 
-	csv->quote_char = '"';
+	CH_SEP = ',';
+	if ((svp = hv_fetchs (self, "sep_char",       FALSE)) && *svp && SvOK (*svp))
+	    CH_SEP = *SvPV (*svp, len);
+	if ((svp = hv_fetchs (self, "sep",            FALSE)) && *svp && SvOK (*svp)) {
+	    ptr = SvPV (*svp, len);
+	    if (len < MAX_SEP_LEN) {
+		memcpy (csv->sep, ptr, len);
+		if (len > 1)
+		    csv->sep_len = len;
+		}
+	    }
+
+	CH_QUOTE = '"';
 	if ((svp = hv_fetchs (self, "quote_char",     FALSE)) && *svp) {
 	    if (SvOK (*svp)) {
 		ptr = SvPV (*svp, len);
-		csv->quote_char = len ? *ptr : (char)0;
+		CH_QUOTE = len ? *ptr : (char)0;
 		}
 	    else
-		csv->quote_char = (char)0;
+		CH_QUOTE = (char)0;
+	    }
+	if ((svp = hv_fetchs (self, "quote",          FALSE)) && *svp && SvOK (*svp)) {
+	    ptr = SvPV (*svp, len);
+	    if (len < MAX_QUO_LEN) {
+		memcpy (csv->quo, ptr, len);
+		if (len > 1)
+		    csv->quo_len = len;
+		}
 	    }
 
 	csv->escape_char = '"';
@@ -504,18 +570,6 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 		}
 	    else
 		csv->escape_char = (char)0;
-	    }
-	CH_SEP = ',';
-	csv->sep_len = 0;
-	if ((svp = hv_fetchs (self, "sep_char",       FALSE)) && *svp && SvOK (*svp))
-	    CH_SEP = *SvPV (*svp, len);
-	if ((svp = hv_fetchs (self, "sep",            FALSE)) && *svp && SvOK (*svp)) {
-	    ptr = SvPV (*svp, len);
-	    if (len < MAX_SEP_LEN) {
-		memcpy (csv->sep, ptr, len);
-		if (len > 1)
-		    csv->sep_len = len;
-		}
 	    }
 
 	if ((svp = hv_fetchs (self, "eol",            FALSE)) && *svp && SvOK (*svp)) {
@@ -591,8 +645,9 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 		? 0
 		: 1
 	: 0;
-    /* Consider setting utf8 to TRUE is the separator is UTF8 */
     if (csv->sep_len && is_utf8_string ((U8 *)(csv->sep), csv->sep_len))
+	csv->utf8 = 1;
+    if (csv->quo_len && is_utf8_string ((U8 *)(csv->quo), csv->quo_len))
 	csv->utf8 = 1;
     } /* SetupCsv */
 
@@ -694,11 +749,6 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 {
     int		i, n, bound = 0;
 
-    if (CH_SEP == csv->quote_char || CH_SEP == csv->escape_char) {
-	(void)SetDiag (csv, 1001);
-	return FALSE;
-	}
-
     n = av_len (fields);
     if (n < 0 && csv->is_bound) {
 	n = csv->is_bound - 1;
@@ -709,13 +759,12 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 	SV    *sv;
 
 	if (i > 0) {
+	    CSV_PUT (csv, dst, CH_SEP);
 	    if (csv->sep_len) {
 		int x;
-		for (x = 0; x < (int)csv->sep_len; x++)
+		for (x = 1; x < (int)csv->sep_len; x++)
 		    CSV_PUT (csv, dst, csv->sep[x]);
 		}
-	    else
-		CSV_PUT (csv, dst, CH_SEP);
 	    }
 
 	if (bound)
@@ -743,7 +792,7 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 	     * and if the string contains quote or escape characters.
 	     */
 	    if (!quoteMe &&
-	       ( quoteMe = (!SvIOK (sv) && !SvNOK (sv) && csv->quote_char))) {
+	       ( quoteMe = (!SvIOK (sv) && !SvNOK (sv) && CH_QUOTE))) {
 		char	*ptr2;
 		STRLEN	 l;
 
@@ -752,7 +801,7 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 
 		    if (c < csv->first_safe_char ||
 		       (csv->quote_binary && c >= 0x7f && c <= 0xa0) ||
-		       (csv->quote_char   && c == csv->quote_char)   ||
+		       (CH_QUOTE          && c == CH_QUOTE)          ||
 		       (CH_SEP            && c == CH_SEP)            ||
 		       (csv->escape_char  && c == csv->escape_char)) {
 			/* Binary character */
@@ -761,8 +810,14 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		    }
 		quoteMe = (l > 0);
 		}
-	    if (quoteMe)
-		CSV_PUT (csv, dst, csv->quote_char);
+	    if (quoteMe) {
+		CSV_PUT (csv, dst, CH_QUOTE);
+		if (csv->quo_len) {
+		    int x;
+		    for (x = 1; x < (int)csv->quo_len; x++)
+			CSV_PUT (csv, dst, csv->quo[x]);
+		    }
+		}
 	    while (len-- > 0) {
 		char	c = *ptr++;
 		int	e = 0;
@@ -775,7 +830,8 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		    (void)SetDiag (csv, 2110);
 		    return FALSE;
 		    }
-		if (c == csv->quote_char  && csv->quote_char)
+		if (CH_QUOTE && (byte)c == CH_QUOTE && (csv->quo_len == 0 ||
+			 memcmp (ptr, csv->quo +1, csv->quo_len - 1) == 0))
 		    e = 1;
 		else
 		if (c == csv->escape_char && csv->escape_char)
@@ -789,8 +845,14 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		    CSV_PUT (csv, dst, csv->escape_char);
 		CSV_PUT (csv, dst, c);
 		}
-	    if (quoteMe)
-		CSV_PUT (csv, dst, csv->quote_char);
+	    if (quoteMe) {
+		CSV_PUT (csv, dst, CH_QUOTE);
+		if (csv->quo_len) {
+		    int x;
+		    for (x = 1; x < (int)csv->quo_len; x++)
+			CSV_PUT (csv, dst, csv->quo[x]);
+		    }
+		}
 	    }
 	}
     if (csv->eol_len) {
@@ -900,6 +962,8 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 #define PUT_RPT       fprintf (stderr, "# CSV_PUT  @ %4d: 0x%02x '%c'\n", __LINE__, c, isprint (c) ? c : '?')
 #define PUT_SEPX_RPT1 fprintf (stderr, "# PUT SEPX @ %4d\n", __LINE__)
 #define PUT_SEPX_RPT2 fprintf (stderr, "# Done putting SEPX\n")
+#define PUT_QUOX_RPT1 fprintf (stderr, "# PUT QUOX @ %4d\n", __LINE__)
+#define PUT_QUOX_RPT2 fprintf (stderr, "# Done putting QUOX\n")
 #define PUT_EOLX_RPT1 fprintf (stderr, "# PUT EOLX @ %4d\n", __LINE__)
 #define PUT_EOLX_RPT2 fprintf (stderr, "# Done putting EOLX\n")
 #define PUSH_RPT      fprintf (stderr, "# AV_PUSHd @ %4d\n", __LINE__); sv_dump (sv)
@@ -907,6 +971,8 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 #define PUT_RPT
 #define PUT_SEPX_RPT1
 #define PUT_SEPX_RPT2
+#define PUT_QUOX_RPT1
+#define PUT_QUOX_RPT2
 #define PUT_EOLX_RPT1
 #define PUT_EOLX_RPT2
 #define PUSH_RPT
@@ -930,10 +996,15 @@ static int cx_CsvGet (pTHX_ csv_t *csv, SV *src)
 	}					\
     else if (c == CH_SEPX) {			\
 	int x; PUT_SEPX_RPT1;			\
-	warn ("PUT SEPX\n");\
 	for (x = 0; x < (int)csv->sep_len; x++)	\
 	    CSV_PUT_SV1 (csv->sep[x]);		\
 	PUT_SEPX_RPT2;				\
+	}					\
+    else if (c == CH_QUOTEX) {			\
+	int x; PUT_QUOX_RPT1;			\
+	for (x = 0; x < (int)csv->quo_len; x++)	\
+	    CSV_PUT_SV1 (csv->quo[x]);		\
+	PUT_QUOX_RPT2;				\
 	}					\
     else					\
 	CSV_PUT_SV1 (c);			\
@@ -1033,11 +1104,6 @@ static int cx_Parse (pTHX_ csv_t *csv, SV *src, AV *fields, AV *fflags)
 #if MAINT_DEBUG
     memset (str_parsed, 0, 40);
 #endif
-
-    if (CH_SEP == csv->quote_char || CH_SEP == csv->escape_char) {
-	(void)SetDiag (csv, 1001);
-	return FALSE;
-	}
 
     while ((c = CSV_GET) != EOF) {
 
@@ -1183,7 +1249,7 @@ restart:
 		}
 	    } /* CH_CR */
 	else
-	if (c == csv->quote_char && csv->quote_char) {
+	if (is_QUOTE (c)) {
 #if MAINT_DEBUG > 1
 	    fprintf (stderr, "# %d/%d/%02x pos %d = QUO '%c'\n",
 		waitingForField ? 1 : 0, sv ? 1 : 0, f, spl, c);
@@ -1267,10 +1333,13 @@ restart:
 		if (c2 == '0')
 		    CSV_PUT_SV (0)
 		else
-		if (c2 == csv->quote_char || is_SEP (c2))
+		if (is_QUOTE (c2)) {
+		    if (csv->utf8)
+			f |= CSV_FLAGS_BIN;
 		    CSV_PUT_SV (c2)
+		    }
 		else
-		if (c2 == CH_NL || c2 == CH_EOLX) {
+		if (c2 == CH_NL    || c2 == CH_EOLX) {
 		    AV_PUSH;
 		    return TRUE;
 		    }
@@ -1300,7 +1369,7 @@ restart:
 			    }
 			}
 
-		    if (csv->allow_loose_escapes && csv->escape_char == csv->quote_char) {
+		    if (csv->allow_loose_escapes && csv->escape_char == CH_QUOTE) {
 			CSV_PUT_SV (c);
 			c = c2;
 			goto restart;
@@ -1344,9 +1413,12 @@ restart:
 		    if (c2 == '0')
 			CSV_PUT_SV (0)
 		    else
-		    if ( c2 == csv->quote_char  || is_SEP (c2) ||
-			 c2 == csv->escape_char || csv->allow_loose_escapes)
+		    if ( is_QUOTE (c2) || is_SEP (c2) ||
+			 c2 == csv->escape_char || csv->allow_loose_escapes) {
+			if (csv->utf8)
+			    f |= CSV_FLAGS_BIN;
 			CSV_PUT_SV (c2)
+			}
 		    else {
 			csv->used--;
 			ERROR_INSIDE_QUOTES (2025);
@@ -1365,9 +1437,12 @@ restart:
 		if (c2 == '0')
 		    CSV_PUT_SV (0)
 		else
-		if ( c2 == csv->quote_char  || is_SEP (c2) ||
-		     c2 == csv->escape_char || csv->allow_loose_escapes)
+		if ( is_QUOTE (c2) || is_SEP (c2) ||
+		     c2 == csv->escape_char || csv->allow_loose_escapes) {
+		    if (csv->utf8)
+			f |= CSV_FLAGS_BIN;
 		    CSV_PUT_SV (c2)
+		    }
 		else {
 		    csv->used--;
 		    ERROR_INSIDE_QUOTES (2025);
