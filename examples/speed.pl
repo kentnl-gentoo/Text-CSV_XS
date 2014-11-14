@@ -13,15 +13,16 @@ use Benchmark qw(:all :hireswallclock);
 our $csv = Text::CSV_XS->new ({ eol => "\n" });
 
 my $duration = int (shift || 2);
-our @fields1 = (
-    "Wiedmann", "Jochen",
-    "Am Eisteich 9",
-    "72555 Metzingen",
-    "Germany",
-    "+49 7123 14881",
-    "joe\@ispsoft,de");
-our @fields10  = (@fields1) x 10;
-our @fields100 = (@fields1) x 100;
+my  @fields = (
+    "Holmes", "Sherlock",
+    "Baker street", 221, "B",
+    72555, "London", "NW1 6XE",
+    "United Kingdom",
+    "+44 7123 84567",
+    "sherlock\@holmes,co.uk");
+our @fields1   = (@fields) x 1;
+our @fields10  = (@fields) x 10;
+our @fields100 = (@fields) x 100;
 
 $csv->combine (@fields1  ); our $str1   = $csv->string;
 $csv->combine (@fields10 ); our $str10  = $csv->string;

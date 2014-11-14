@@ -28,7 +28,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.11";
+$VERSION   = "1.12";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -69,7 +69,7 @@ my %def_attr = (
     allow_unquoted_escape	=> 0,
     always_quote		=> 0,
     quote_space			=> 1,
-    quote_null			=> 1,
+    escape_null			=> 1,
     quote_binary		=> 1,
     keep_meta_info		=> 0,
     verbatim			=> 0,
@@ -90,6 +90,7 @@ my %def_attr = (
 my %attr_alias = (
     quote_always		=> "always_quote",
     verbose_diag		=> "diag_verbose",
+    quote_null			=> "escape_null",
     );
 my $last_new_err = Text::CSV_XS->SetDiag (0);
 
@@ -228,7 +229,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     auto_diag			=> 24,
     diag_verbose		=> 33,
     quote_space			=> 25,
-    quote_null			=> 31,
+    escape_null			=> 31,
     quote_binary		=> 32,
     decode_utf8			=> 35,
     _has_hooks			=> 36,
@@ -371,12 +372,13 @@ sub quote_space
     $self->{quote_space};
     } # quote_space
 
-sub quote_null
+sub escape_null
 {
     my $self = shift;
-    @_ and $self->_set_attr_X ("quote_null", shift);
-    $self->{quote_null};
-    } # quote_null
+    @_ and $self->_set_attr_X ("escape_null", shift);
+    $self->{escape_null};
+    } # escape_null
+sub quote_null { goto &escape_null; }
 
 sub quote_binary
 {
@@ -557,7 +559,7 @@ sub callbacks
 sub error_diag
 {
     my $self = shift;
-    my @diag = (0 + $last_new_err, $last_new_err, 0, 0);
+    my @diag = (0 + $last_new_err, $last_new_err, 0, 0, 0);
 
     if ($self && ref $self && # Not a class method or direct call
 	 $self->isa (__PACKAGE__) && exists $self->{_ERROR_DIAG}) {
@@ -565,6 +567,7 @@ sub error_diag
 	$diag[1] =     $self->{_ERROR_DIAG};
 	$diag[2] = 1 + $self->{_ERROR_POS} if exists $self->{_ERROR_POS};
 	$diag[3] =     $self->{_RECNO};
+	$diag[4] =     $self->{_ERROR_FLD} if exists $self->{_ERROR_FLD};
 
 	$diag[0] && $self && $self->{callbacks} && $self->{callbacks}{error} and
 	    return $self->{callbacks}{error}->(@diag);
@@ -574,6 +577,7 @@ sub error_diag
     unless (defined $context) {	# Void context, auto-diag
 	if ($diag[0] && $diag[0] != 2012) {
 	    my $msg = "# CSV_XS ERROR: $diag[0] - $diag[1] \@ rec $diag[3] pos $diag[2]\n";
+	    $diag[4] and $msg =~ s/$/ field $diag[4]/;
 	    if ($self && ref $self) {	# auto_diag
 		if ($self->{diag_verbose} and $self->{_ERROR_INPUT}) {
 		    $msg .= "$self->{_ERROR_INPUT}'\n";
@@ -689,7 +693,6 @@ sub combine
     my $self = shift;
     my $str  = "";
     $self->{_FIELDS} = \@_;
-    $self->{_FFLAGS} = undef;
     $self->{_STATUS} = (@_ > 0) && $self->Combine (\$str, \@_, 0);
     $self->{_STRING} = \$str;
     $self->{_STATUS};
@@ -926,9 +929,10 @@ sub _csv_attr
 	    $fh = $out;
 	    }
 	else {
-	    open $fh, ">$enc", $out or croak "$out: $!";
+	    open $fh, ">", $out or croak "$out: $!";
 	    $cls = 1;
 	    }
+	$enc and binmode $fh, $enc;
 	}
 
     if (   ref $in eq "CODE" or ref $in eq "ARRAY") {
@@ -987,12 +991,17 @@ sub _csv_attr
 
 sub csv
 {
-    # This is a function, not a method
-    @_ && ref $_[0] ne __PACKAGE__ or croak $csv_usage;
+    @_ && ref $_[0] eq __PACKAGE__ and shift @_;
+    @_ or croak $csv_usage;
 
     my $c = _csv_attr (@_);
 
     my ($csv, $in, $fh, $hdrs) = @{$c}{"csv", "in", "fh", "hdrs"};
+    my %hdr;
+    if (ref $hdrs eq "HASH") {
+	%hdr  = %$hdrs;
+	$hdrs = "auto";
+	}
 
     if ($c->{out}) {
 	if (ref $in eq "CODE") {
@@ -1004,7 +1013,7 @@ sub csv
 		    }
 		if (ref $row eq "HASH") {
 		    if ($hdr) {
-			$hdrs ||= [ keys %$row ];
+			$hdrs ||= [ map { $hdr{$_} || $_ } keys %$row ];
 			$csv->print ($fh, $hdrs);
 			$hdr = 0;
 			}
@@ -1021,7 +1030,8 @@ sub csv
 		}
 	    }
 	else { # aoh
-	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$in->[0]};
+	    my @hdrs = ref $hdrs ? @{$hdrs}
+				 : map { $hdr{$_} || $_ } keys %{$in->[0]};
 	    defined $hdrs or $hdrs = "auto";
 	    ref $hdrs || $hdrs eq "auto" and $csv->print ($fh, \@hdrs);
 	    for (@{$in}) {
@@ -1039,8 +1049,13 @@ sub csv
 
     my $key = $c->{key} and $hdrs ||= "auto";
     if (defined $hdrs && !ref $hdrs) {
-	$hdrs eq "skip" and         $csv->getline ($fh);
-	$hdrs eq "auto" and $hdrs = $csv->getline ($fh);
+	if ($hdrs eq "skip") {
+	    $csv->getline ($fh); # discard;
+	    }
+	elsif ($hdrs eq "auto") {
+	    my $h = $csv->getline ($fh) or return;
+	    $hdrs = [ map { $hdr{$_} || $_ } @$h ];
+	    }
 	}
 
     my $frag = $c->{frag};
@@ -1069,6 +1084,8 @@ sub csv
 1;
 
 __END__
+
+=encoding iso-8859-1
 
 =head1 NAME
 
@@ -1627,12 +1644,13 @@ this to be forced in C<CSV>,  nor any for the opposite, the default is true
 for safety.   You can exclude the space  from this trigger  by setting this
 attribute to 0.
 
-=item quote_null
+=item escape_null or quote_null (deprecated)
+X<escape_null>
 X<quote_null>
 
- my $csv = Text::CSV_XS->new ({ quote_null => 1 });
-         $csv->quote_null (0);
- my $f = $csv->quote_null;
+ my $csv = Text::CSV_XS->new ({ escape_null => 1 });
+         $csv->escape_null (0);
+ my $f = $csv->escape_null;
 
 By default, a C<NULL> byte in a field would be escaped. This option enables
 you to treat the  C<NULL>  byte as a simple binary character in binary mode
@@ -1662,6 +1680,24 @@ However,  some parsing information - like quotation of the original field -
 is lost in that process.  Setting this flag to true enables retrieving that
 information after parsing with  the methods  L</meta_info>,  L</is_quoted>,
 and L</is_binary> described below.  Default is false for performance.
+
+If you set this attribute to a value greater than 9,   than you can control
+output quotation style like it was used in the input of the the last parsed
+record (unless quotation was added because of other reasons).
+
+ my $csv = Text::CSV_XS->new ({
+    binary         => 1,
+    keep_meta_info => 1,
+    quote_space    => 0,
+    });
+
+ my $row = $csv->parse (q{1,,"", ," ",f,"g","h""h",hëlp,"hélp"});
+
+ $csv->print (*STDOUT, \@row);
+ # 1,,, , ,f,g,"h""h",h?lp,h?lp
+ $csv->keep_meta_info (11);
+ $csv->print (*STDOUT, \@row);
+ # 1,,"", ," ",f,"g","h""h",h?lp,"h?lp"
 
 =item verbatim
 X<verbatim>
@@ -1737,7 +1773,7 @@ is equivalent to
      allow_unquoted_escape => 0,
      always_quote          => 0,
      quote_space           => 1,
-     quote_null	           => 1,
+     escape_null           => 1,
      quote_binary          => 1,
      keep_meta_info        => 0,
      verbatim              => 0,
@@ -2175,6 +2211,8 @@ in L<C<quote_char>|/quote_char> quotes.  This might be important for fields
 where content C<,20070108,> is to be treated as a numeric value,  and where
 C<,"20070108",> is explicitly marked as character string data.
 
+This method is only valid when L</keep_meta_info> is set to a true value.
+
 =head2 is_binary
 X<is_binary>
 
@@ -2185,6 +2223,8 @@ result of L</parse>.
 
 This returns a true value if the data in the indicated column contained any
 byte in the range C<[\x00-\x08,\x10-\x1F,\x7F-\xFF]>.
+
+This method is only valid when L</keep_meta_info> is set to a true value.
 
 =head2 is_missing
 X<is_missing>
@@ -2211,8 +2251,8 @@ X<status>
 
  $status = $csv->status ();
 
-This method returns success (or failure) of the last invoked L</combine> or
-L</parse> call.
+This method returns the status of the last invoked L</combine> or L</parse>
+call. Status is success (true: C<1>) or failure (false: C<undef> or C<0>).
 
 =head2 error_input
 X<error_input>
@@ -2228,9 +2268,9 @@ X<error_diag>
 
  Text::CSV_XS->error_diag ();
  $csv->error_diag ();
- $error_code           = 0  + $csv->error_diag ();
- $error_str            = "" . $csv->error_diag ();
- ($cde, $str, $pos, $recno) = $csv->error_diag ();
+ $error_code               = 0  + $csv->error_diag ();
+ $error_str                = "" . $csv->error_diag ();
+ ($cde, $str, $pos, $rec, $fld) = $csv->error_diag ();
 
 If (and only if) an error occurred,  this function returns  the diagnostics
 of that error.
@@ -2239,11 +2279,14 @@ If called in void context,  this will print the internal error code and the
 associated error message to STDERR.
 
 If called in list context,  this will return  the error code  and the error
-message in that order.  If the last error was from parsing, the third value
-returned  is a best guess  at the location  within the line  that was being
-parsed.  Its value is 1-based. The fourth value represents the record count
-parsed by this csv instance. See F<examples/csv-check>  for how this can be
-used.
+message in that order.  If the last error was from parsing, the rest of the
+values returned are a best guess at the location  within the line  that was
+being parsed. Their values are 1-based.  The position currently is index of
+the byte at which the parsing failed in the current record. It might change
+to be the index of the current character in a later release. The records is
+the index of the record parsed by the csv instance. The field number is the
+index of the field the parser thinks it is currently  trying to  parse. See
+F<examples/csv-check> for how this can be used.
 
 If called in  scalar context,  it will return  the diagnostics  in a single
 scalar, a-la C<$!>.  It will contain the error code in numeric context, and
@@ -2289,6 +2332,13 @@ can get to the error using the class call to L</error_diag>
 
  my $aoa = csv (in => "test.csv") or
      die Text::CSV_XS->error_diag;
+
+Alternative invocations:
+
+ my $aoa = Text::CSV_XS::csv (in => "file.csv");
+
+ my $csv = Text::CSV_XS->new ();
+ my $aoa = $csv->csv (in => "file.csv"); # ignore object attributes
 
 This function takes the arguments as key-value pairs. This can be passed as
 a list or as an anonymous hash:
@@ -2364,8 +2414,8 @@ If this attribute is not given, the default behavior is to produce an array
 of arrays.
 
 If C<headers> is supplied,  it should be either an anonymous list of column
-names or a flag:  C<auto> or C<skip>. When C<skip> is used, the header will
-not be included in the output.
+names, an anonymous hashref or a flag:  C<auto> or C<skip>. When C<skip> is
+used, the header will not be included in the output.
 
  my $aoa = csv (in => $fh, headers => "skip");
 
@@ -2379,6 +2429,26 @@ instead
 
  my $aoh = csv (in => $fh, headers => [qw( Foo Bar )]);
  csv (in => $aoa, out => $fh, headers => [qw( code description price }]);
+
+If C<headers> is an hash reference, this implies C<auto>, but header fields
+for that exist as key in the hashref will be replaced by the value for that
+key. Given a CSV file like
+
+ post-kode,city,name,id number,fubble
+ 1234AA,Duckstad,Donald,13,"X313DF"
+
+using
+
+ csv (headers => { "post-kode" => "pc", "id number" => "ID" }, ...
+
+will return an entry like
+
+ { pc       => "1234AA",
+   city     => "Duckstad",
+   name     => "Donald",
+   ID       => "13",
+   fubble => "X313DF",
+   }
 
 =head3 key
 X<key>
@@ -2458,11 +2528,11 @@ returned by L</error_diag>:
 
  sub ignore3006
  {
-     my ($err, $msg, $pos, $recno) = @_;
+     my ($err, $msg, $pos, $recno, $fldno) = @_;
      if ($err == 3006) {
          # ignore this error
          ($c, $s) = (undef, undef);
-         SetDiag (0);
+         Text::CSV_XS->SetDiag (0);
          }
      # Any other error
      return;
@@ -2828,6 +2898,11 @@ C<|>, or other non-comma separators.
 Examples could be taken from W3C's L<CSV on the Web: Use Cases and
 Requirements|http://w3c.github.io/csvw/use-cases-and-requirements/index.html>
 
+=item Steal
+
+Steal good new ideas and features from L<PapaParse|http://papaparse.com> or
+L<csvkit|http://csvkit.readthedocs.org>.
+
 =back
 
 =head2 NOT TODO
@@ -3127,8 +3202,15 @@ X<3010>
 =head1 SEE ALSO
 
 L<IO::File>,  L<IO::Handle>,  L<IO::Wrap>,  L<Text::CSV>,  L<Text::CSV_PP>,
-L<Text::CSV::Encoded>,  L<Text::CSV::Separator>,   L<Spreadsheet::CSV>  and
-L<Spreadsheet::Read>, and of course L<perl>.
+L<Text::CSV::Encoded>,     L<Text::CSV::Separator>,    L<Text::CSV::Slurp>,
+L<Spreadsheet::CSV> and L<Spreadsheet::Read>, and of course L<perl>.
+
+=head3 non-perl
+
+A CSV parser in JavaScript,  also used by L<W3C|http://www.w3.org>,  is the
+multi-threaded in-browser L<PapaParse|http://papaparse.com/>.
+
+L<csvkit|http://csvkit.readthedocs.org> is a python CSV parsing toolkit.
 
 =head1 AUTHOR
 

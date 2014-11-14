@@ -7,7 +7,7 @@ build_requires:
 configure_requires: 
   ExtUtils::MakeMaker: 0
 dynamic_config: 1
-generated_by: Author, CPAN::Meta::Converter version 2.142060
+generated_by: Author, CPAN::Meta::Converter version 2.142690
 license: perl
 meta-spec: 
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -16,10 +16,10 @@ name: Text-CSV_XS
 provides: 
   Text::CSV_XS: 
     file: CSV_XS.pm
-    version: '1.11'
+    version: '1.12'
 recommends: 
-  Encode: '2.62'
-  perl: '5.020000'
+  Encode: '2.64'
+  perl: '5.020001'
 requires: 
   DynaLoader: 0
   IO::Handle: 0
@@ -27,6 +27,8 @@ requires:
   Tie::Scalar: 0
   perl: '5.006001'
 resources: 
+  IRC: irc://irc.perl.org/#csv
+  homepage: https://metacpan.org/pod/Text::CSV_XS
   license: http://dev.perl.org/licenses/
   repository: http://repo.or.cz/r/Text-CSV_XS.git
-version: '1.11'
+version: '1.12'

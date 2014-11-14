@@ -1,9 +1,21 @@
-1.11	- 2014-08-08, H.Merijn Brand
-    - Fixed eof (RT#97742)
-    - Check for attribute conflicts early
-    - csv (in => [..]) now defaults to *STDOUT for out
-    - Support for multi-byte quote_char
-    - New attribute "key" for csv ()
+1.12	- 2014-11-01, H.Merijn Brand
+    * Add field number to error_diag
+    * Fixed non-IO parsing multi-byte EOL
+    * Fixed a possible missed multi-byte EOL
+    * Allow hashref for csv ()'s headers attribute
+    * Allow encoding on all output handles in csv ()
+    * Include doc changes as ticketed in the Text::CSV queue
+    * Fix parallel testing issue
+    * Allow csv as method call (not using the object)
+    * Rename quote_null to escape_null
+    * Give meaning to keep_meta_info on output
+
+1.11	- 2014-08-16, H.Merijn Brand
+    * Fixed eof (RT#97742)
+    * Check for attribute conflicts early
+    * csv (in => [..]) now defaults to *STDOUT for out
+    * Support for multi-byte quote_char
+    * New attribute "key" for csv ()
 
 1.10	- 2014-08-04, H.Merijn Brand
     * Support for scalar ref in out: csv (out => \(my $x = ""), ...)
