@@ -1,6 +1,6 @@
 package Text::CSV_XS;
 
-# Copyright (c) 2007-2014 H.Merijn Brand.  All rights reserved.
+# Copyright (c) 2007-2015 H.Merijn Brand.  All rights reserved.
 # Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
 # Copyright (c) 1997 Alan Citterman.       All rights reserved.
 #
@@ -9,14 +9,12 @@ package Text::CSV_XS;
 
 # HISTORY
 #
-# Written by:
-#    Jochen Wiedmann <joe@ispsoft.de>
-#
-# Based on Text::CSV by:
-#    Alan Citterman <alan@mfgrtl.com>
-#
-# Extended and Remodelled by:
+# 0.24 -
 #    H.Merijn Brand (h.m.brand@xs4all.nl)
+# 0.10 - 0.23
+#    Jochen Wiedmann <joe@ispsoft.de>
+# Based on (the original) Text::CSV by:
+#    Alan Citterman <alan@mfgrtl.com>
 
 require 5.006001;
 
@@ -28,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.12";
+$VERSION   = "1.13";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -36,6 +34,11 @@ bootstrap Text::CSV_XS $VERSION;
 sub PV { 0 }
 sub IV { 1 }
 sub NV { 2 }
+
+if ($] < 5.008002) {
+    no warnings "redefine";
+    *utf8::decode = sub {};
+    }
 
 # version
 #
@@ -114,6 +117,7 @@ sub _check_sanity
 {
     my $self = shift;
 
+    my $eol = $self->{eol};
     my $sep = $self->{sep};
     defined $sep && length ($sep) or $sep = $self->{sep_char};
     my $quo = $self->{quote};
@@ -123,11 +127,22 @@ sub _check_sanity
 #    use DP;::diag ("SEP: '", DPeek ($sep),
 #	        "', QUO: '", DPeek ($quo),
 #	        "', ESC: '", DPeek ($esc),"'");
-    # sep_char cannot be undefined
-    defined $quo && $quo eq $sep  and return 1001;
-    defined $esc && $esc eq $sep  and return 1001;
-
-    defined $_ && $_ =~ m/[\r\n]/ and return 1003 for $sep, $quo, $esc;
+    if (defined $sep) {	# sep_char cannot be undefined
+	length ($sep) > 16	and return 1006;
+	$sep =~ m/[\r\n]/	and return 1003;
+	}
+    if (defined $quo) {
+	$quo eq $sep		and return 1001;
+	length ($quo) > 16	and return 1007;
+	$quo =~ m/[\r\n]/	and return 1003;
+	}
+    if (defined $esc) {
+	$esc eq $sep		and return 1001;
+	$esc =~ m/[\r\n]/	and return 1003;
+	}
+    if (defined $eol) {
+	length ($eol) > 16	and return 1005;
+	}
 
     return _unhealthy_whitespace ($self, $self->{allow_whitespace});
     } # _check_sanity
@@ -160,8 +175,7 @@ sub new
     for (keys %attr) {
 	if (m/^[a-z]/ && exists $def_attr{$_}) {
 	    # uncoverable condition false
-	    defined $attr{$_} && $] >= 5.008002 && m/_char$/ and
-		utf8::decode ($attr{$_});
+	    defined $attr{$_} && m/_char$/ and utf8::decode ($attr{$_});
 	    next;
 	    }
 #	croak?
@@ -241,7 +255,7 @@ sub _set_attr_C
 {
     my ($self, $name, $val, $ec) = @_;
     defined $val or $val = 0;
-    $] >= 5.008002 and utf8::decode ($val);
+    utf8::decode ($val);
     $self->{$name} = $val;
     $ec = _check_sanity ($self) and
 	croak ($self->SetDiag ($ec));
@@ -283,9 +297,10 @@ sub quote
     if (@_) {
 	my $quote = shift;
 	defined $quote or $quote = "";
-	$] >= 5.008002 and utf8::decode ($quote);
+	utf8::decode ($quote);
 	my @b = unpack "U0C*", $quote;
 	if (@b > 1) {
+	    @b > 16 and croak ($self->SetDiag (1007));
 	    $self->quote_char ("\0");
 	    }
 	else {
@@ -326,9 +341,10 @@ sub sep
     if (@_) {
 	my $sep = shift;
 	defined $sep or $sep = "";
-	$] >= 5.008002 and utf8::decode ($sep);
+	utf8::decode ($sep);
 	my @b = unpack "U0C*", $sep;
 	if (@b > 1) {
+	    @b > 16 and croak ($self->SetDiag (1006));
 	    $self->sep_char ("\0");
 	    }
 	else {
@@ -352,6 +368,7 @@ sub eol
     if (@_) {
 	my $eol = shift;
 	defined $eol or $eol = "";
+	length ($eol) > 16 and croak ($self->SetDiag (1005));
 	$self->{eol} = $eol;
 	$self->_cache_set ($_cache_id{eol}, $eol);
 	}
@@ -578,32 +595,34 @@ sub error_diag
 	if ($diag[0] && $diag[0] != 2012) {
 	    my $msg = "# CSV_XS ERROR: $diag[0] - $diag[1] \@ rec $diag[3] pos $diag[2]\n";
 	    $diag[4] and $msg =~ s/$/ field $diag[4]/;
-	    if ($self && ref $self) {	# auto_diag
-		if ($self->{diag_verbose} and $self->{_ERROR_INPUT}) {
-		    $msg .= "$self->{_ERROR_INPUT}'\n";
-		    $msg .= " " x ($diag[2] - 1);
-		    $msg .= "^\n";
-		    }
 
-		my $lvl = $self->{auto_diag};
-		if ($lvl < 2) {
-		    my @c = caller (2);
-		    if (@c >= 11 && $c[10] && ref $c[10] eq "HASH") {
-			my $hints = $c[10];
-			(exists $hints->{autodie} && $hints->{autodie} or
-			 exists $hints->{"guard Fatal"} &&
-			!exists $hints->{"no Fatal"}) and
-			    $lvl++;
-			# Future releases of autodie will probably set $^H{autodie}
-			#  to "autodie @args", like "autodie :all" or "autodie open"
-			#  so we can/should check for "open" or "new"
-			}
-		    }
-		$lvl > 1 ? die $msg : warn $msg;
-		}
-	    else {	# called without args in void context
+	    unless ($self && ref $self) {	# auto_diag
+	    	# called without args in void context
 		warn $msg;
+		return;
 		}
+
+	    if ($self->{diag_verbose} and $self->{_ERROR_INPUT}) {
+		$msg .= "$self->{_ERROR_INPUT}'\n";
+		$msg .= " " x ($diag[2] - 1);
+		$msg .= "^\n";
+		}
+
+	    my $lvl = $self->{auto_diag};
+	    if ($lvl < 2) {
+		my @c = caller (2);
+		if (@c >= 11 && $c[10] && ref $c[10] eq "HASH") {
+		    my $hints = $c[10];
+		    (exists $hints->{autodie} && $hints->{autodie} or
+		     exists $hints->{"guard Fatal"} &&
+		    !exists $hints->{"no Fatal"}) and
+			$lvl++;
+		    # Future releases of autodie will probably set $^H{autodie}
+		    #  to "autodie @args", like "autodie :all" or "autodie open"
+		    #  so we can/should check for "open" or "new"
+		    }
+		}
+	    $lvl > 1 ? die $msg : warn $msg;
 	    }
 	return;
 	}
@@ -946,7 +965,7 @@ sub _csv_attr
 	}
     elsif (ref $in or "GLOB" eq ref \$in) {
 	if (!ref $in && $] < 5.008005) {
-	    $fh = \*$in;
+	    $fh = \*$in; # uncoverable statement ancient perl version required
 	    }
 	else {
 	    $fh = $in;
@@ -1030,10 +1049,10 @@ sub csv
 		}
 	    }
 	else { # aoh
-	    my @hdrs = ref $hdrs ? @{$hdrs}
-				 : map { $hdr{$_} || $_ } keys %{$in->[0]};
+	    my @hdrs = ref $hdrs ? @{$hdrs} : keys %{$in->[0]};
 	    defined $hdrs or $hdrs = "auto";
-	    ref $hdrs || $hdrs eq "auto" and $csv->print ($fh, \@hdrs);
+	    ref $hdrs || $hdrs eq "auto" and
+		$csv->print ($fh, [ map { $hdr{$_} || $_ } @hdrs ]);
 	    for (@{$in}) {
 		$c->{cboi} and $c->{cboi}->($csv, $_);
 		$c->{cbbo} and $c->{cbbo}->($csv, $_);
@@ -1044,8 +1063,6 @@ sub csv
 	$c->{cls} and close $fh;
 	return 1;
 	}
-
-    ref $in eq "CODE" and croak "CODE only valid fro in when using out";
 
     my $key = $c->{key} and $hdrs ||= "auto";
     if (defined $hdrs && !ref $hdrs) {
@@ -1085,7 +1102,7 @@ sub csv
 
 __END__
 
-=encoding iso-8859-1
+=encoding utf-8
 
 =head1 NAME
 
@@ -1691,7 +1708,7 @@ record (unless quotation was added because of other reasons).
     quote_space    => 0,
     });
 
- my $row = $csv->parse (q{1,,"", ," ",f,"g","h""h",hëlp,"hélp"});
+ my $row = $csv->parse (q{1,,"", ," ",f,"g","h""h",hÃ«lp,"hÃ©lp"});
 
  $csv->print (*STDOUT, \@row);
  # 1,,, , ,f,g,"h""h",h?lp,h?lp
@@ -3043,6 +3060,24 @@ The L<C<callbacks>|/Callbacks>  attribute only allows one to be C<undef> or
 a hash reference.
 
 =item *
+1005 "INI - EOL too long"
+X<1005>
+
+The value passed for EOL is exceeding its maximum length (16).
+
+=item *
+1006 "INI - SEP too long"
+X<1006>
+
+The value passed for SEP is exceeding its maximum length (16).
+
+=item *
+1007 "INI - QUOTE too long"
+X<1007>
+
+The value passed for QUOTE is exceeding its maximum length (16).
+
+=item *
 2010 "ECR - QUO char inside quotes followed by CR not part of EOL"
 X<2010>
 
@@ -3230,7 +3265,7 @@ L</csv> function. See ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
- Copyright (C) 2007-2014 H.Merijn Brand.  All rights reserved.
+ Copyright (C) 2007-2015 H.Merijn Brand.  All rights reserved.
  Copyright (C) 1998-2001 Jochen Wiedmann. All rights reserved.
  Copyright (C) 1997      Alan Citterman.  All rights reserved.
 

@@ -5,7 +5,7 @@ use warnings;
 use Config;
 
 #use Test::More "no_plan";
- use Test::More tests => 29;
+ use Test::More tests => 40;
 
 BEGIN {
     use_ok "Text::CSV_XS", ("csv");
@@ -56,7 +56,7 @@ my @aoa = @{$aoa}[1,2];
 is_deeply (csv (file => $file, headers  => "skip"),    \@aoa, "AOA skip");
 is_deeply (csv (file => $file, fragment => "row=2-3"), \@aoa, "AOA fragment");
 
-if ($] >= 5.008) {
+if ($] >= 5.008001) {
     is_deeply (csv (in => $file, encoding => "utf-8", headers => ["a", "b", "c"],
 		    fragment => "row=2", sep_char => ","),
 	   [{ a => 1, b => 2, c => 3 }], "AOH headers fragment");
@@ -89,8 +89,57 @@ is_deeply (csv (in => $file, headers => "auto"), $aoh, "data from CODE/HR");
 $idx = 0;
 ok (csv (in => \&getrowh, out => $file), "out from CODE/HR (auto headers)");
 is_deeply (csv (in => $file, headers => "auto"), $aoh, "data from CODE/HR");
-
 unlink $file;
+
+# Basic "key" checks
+SKIP: {
+    $] < 5.008 and skip "No ScalarIO support for $]", 2;
+    is_deeply (csv (in => \"key,value\n1,2\n", key => "key"),
+		    { 1 => { key => 1, value => 2 }}, "key");
+    is_deeply (csv (in => \"1,2\n", key => "key", headers => [qw( key value )]),
+		    { 1 => { key => 1, value => 2 }}, "key");
+    }
+
+# Some "out" checks
+open my $fh, ">", $file;
+csv (in => [{ a => 1 }], out => $fh);
+csv (in => [{ a => 1 }], out => $fh, headers => undef);
+csv (in => [{ a => 1 }], out => $fh, headers => "auto");
+csv (in => [{ a => 1 }], out => $fh, headers => ["a"]);
+csv (in => [{ b => 1 }], out => $fh, headers => { b => "a" });
+close $fh;
+open  $fh, "<", $file;
+is (do {local $/; <$fh>}, "a\r\n1\r\n" x 5, "AoH to out");
+close $fh;
+
+# check internal defaults
+{
+    my $ad = 1;
+
+    sub check
+    {
+	my ($csv, $ar) = @_;
+	is ($csv->auto_diag,	$ad,	"default auto_diag ($ad)");
+	is ($csv->binary,	1,	"default binary");
+	is ($csv->eol,		"\r\n",	"default eol");
+	} # check
+
+    open my $fh, ">", \my $out;
+    csv (in => [[1,2]], out => $fh, on_in => \&check);
+
+    # Check that I can overrule auto_diag
+    $ad = 0;
+    csv (in => [[1,2]], out => $fh, on_in => \&check, auto_diag => 0);
+    }
+
+# errors
+{   my $err;
+    local $SIG{__DIE__} = sub { $err = shift; };
+    my $r = eval { csv (in => undef); };
+    is ($r, undef, "csv needs in or file");
+    like ($err, qr{^usage:}, "error");
+    undef $err;
+    }
 
 eval {
     exists  $Config{useperlio} &&

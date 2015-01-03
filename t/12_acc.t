@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 155;
+use Test::More tests => 177;
 
 BEGIN {
     use_ok "Text::CSV_XS";
@@ -96,6 +96,20 @@ is ($csv->sep_char (),			"\0",		"sep_char");
 is ($csv->quote ("++"),			"++",		"quote (\"++\")");
 is ($csv->quote_char (),		"\0",		"quote_char");
 
+# Test single-byte specials in UTF-8 mode
+is ($csv->sep ("|"),			"|",		"sep |");
+is ($csv->sep_char (),			"|",		"sep_char");
+chop (my $s = "|\x{20ac}");
+is ($csv->sep ($s),			"|",		"sep |");
+is ($csv->sep (),			"|",		"sep_char");
+is ($csv->sep_char (),			"|",		"sep_char");
+is ($csv->quote ("'"),			"'",		"quote '");
+is ($csv->quote_char (),		"'",		"quote_char");
+chop (my $q = "'\x{20ac}");
+is ($csv->quote ($q),			"'",		"quote '");
+is ($csv->quote (),			"'",		"quote_char");
+is ($csv->quote_char (),		"'",		"quote_char");
+
 # Funny settings, all three translate to \0 internally
 ok ($csv = Text::CSV_XS->new ({
     sep_char	=> undef,
@@ -159,6 +173,28 @@ foreach my $attr (qw( sep_char quote_char escape_char )) {
     eval { ok ($csv->$attr ("\n"), "$attr => \\n") };
     is (($csv->error_diag)[0], 1003, "not allowed");
     }
+
+# Too long attr (max 16)
+$csv = Text::CSV_XS->new ({ quote => "'" });
+my $xl = "X" x 32;
+eval { $csv->eol ($xl); };
+is (($csv->error_diag)[0],		1005,	"eol too long");
+is ($csv->eol (),			"",	"eol unchanged");
+eval { $csv->sep ($xl); };
+is (($csv->error_diag)[0],		1006,	"sep too long");
+is ($csv->sep (),			",",	"sep unchanged");
+eval { $csv->quote ($xl); };
+is (($csv->error_diag)[0],		1007,	"quo too long");
+is ($csv->quote (),			"'",	"quo unchanged");
+eval { $csv = Text::CSV_XS->new ({ eol   => $xl }); };
+is ($csv,				undef,	"new with EOL too long");
+is ((Text::CSV_XS::error_diag)[0],	1005,	"error set");
+eval { $csv = Text::CSV_XS->new ({ sep   => $xl }); };
+is ($csv,				undef,	"new with SEP too long");
+is ((Text::CSV_XS::error_diag)[0],	1006,	"error set");
+eval { $csv = Text::CSV_XS->new ({ quote => $xl }); };
+is ($csv,				undef,	"new with QUO too long");
+is ((Text::CSV_XS::error_diag)[0],	1007,	"error set");
 
 # And test erroneous calls
 is (Text::CSV_XS::new (0),		   undef,	"new () as function");

@@ -1,4 +1,4 @@
-/*  Copyright (c) 2007-2014 H.Merijn Brand.  All rights reserved.
+/*  Copyright (c) 2007-2015 H.Merijn Brand.  All rights reserved.
  *  Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
  *  This program is free software; you can redistribute it and/or
  *  modify it under the same terms as Perl itself.
@@ -28,9 +28,8 @@
 #define CSV_XS_TYPE_IV	1
 #define CSV_XS_TYPE_NV	2
 
-#define MAX_SEP_LEN	16
-#define MAX_EOL_LEN	16
-#define MAX_QUO_LEN	16
+/* maximum length for EOL, SEP, and QUOTE - keep in sync with .pm */
+#define MAX_ATTR_LEN	16
 
 #define CSV_FLAGS_QUO		0x0001
 #define CSV_FLAGS_BIN		0x0002
@@ -160,9 +159,9 @@ typedef struct {
     int		eol_pos;
     STRLEN	size;
     STRLEN	used;
-    byte	eol[MAX_EOL_LEN];
-    byte	sep[MAX_SEP_LEN];
-    byte	quo[MAX_QUO_LEN];
+    byte	eol[MAX_ATTR_LEN];
+    byte	sep[MAX_ATTR_LEN];
+    byte	quo[MAX_ATTR_LEN];
     char	buffer[BUFFER_SIZE];
     } csv_t;
 
@@ -185,6 +184,9 @@ xs_error_t xs_errors[] =  {
     { 1002, "INI - allow_whitespace with escape_char or quote_char SP or TAB"	},
     { 1003, "INI - \r or \n in main attr not allowed"				},
     { 1004, "INI - callbacks should be undef or a hashref"			},
+    { 1005, "INI - EOL too long"						},
+    { 1006, "INI - SEP too long"						},
+    { 1007, "INI - QUOTE too long"						},
 
     /* Parse errors */
     { 2010, "ECR - QUO char inside quotes followed by CR not part of EOL"	},
@@ -365,7 +367,7 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
     if (SvIOK (val))
 	iv = SvIV (val);
     else if (SvNOK (val))	/* Needed for 5.6.x but safe for 5.8.x+ */
-	iv = (IV)SvNV (val);
+	iv = (IV)SvNV (val);	/* uncoverable statement ancient perl required */
     else
 	iv = *cp;
 
@@ -409,25 +411,19 @@ static void cx_xs_cache_set (pTHX_ HV *hv, int idx, SV *val)
 
 	/* string */
 	case CACHE_ID_sep:
-	    if (len < MAX_SEP_LEN) {
-		memcpy (csv->sep, cp, len);
-		csv->sep_len = len == 1 ? 0 : len;
-		}
+	    memcpy (csv->sep, cp, len);
+	    csv->sep_len = len == 1 ? 0 : len;
 	    break;
 
 	case CACHE_ID_quo:
-	    if (len < MAX_QUO_LEN) {
-		memcpy (csv->quo, cp, len);
-		csv->quo_len = len == 1 ? 0 : len;
-		}
+	    memcpy (csv->quo, cp, len);
+	    csv->quo_len = len == 1 ? 0 : len;
 	    break;
 
 	case CACHE_ID_eol:
-	    if (len < MAX_EOL_LEN) {
-		memcpy (csv->eol, cp, len);
-		csv->eol_len   = len;
-		csv->eol_is_cr = len == 1 && *cp == CH_CR ? 1 : 0;
-		}
+	    memcpy (csv->eol, cp, len);
+	    csv->eol_len   = len;
+	    csv->eol_is_cr = len == 1 && *cp == CH_CR ? 1 : 0;
 	    break;
 
 	default:
@@ -541,11 +537,9 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    CH_SEP = *SvPV (*svp, len);
 	if ((svp = hv_fetchs (self, "sep",            FALSE)) && *svp && SvOK (*svp)) {
 	    ptr = SvPV (*svp, len);
-	    if (len < MAX_SEP_LEN) {
-		memcpy (csv->sep, ptr, len);
-		if (len > 1)
-		    csv->sep_len = len;
-		}
+	    memcpy (csv->sep, ptr, len);
+	    if (len > 1)
+		csv->sep_len = len;
 	    }
 
 	CH_QUOTE = '"';
@@ -559,11 +553,9 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 	    }
 	if ((svp = hv_fetchs (self, "quote",          FALSE)) && *svp && SvOK (*svp)) {
 	    ptr = SvPV (*svp, len);
-	    if (len < MAX_QUO_LEN) {
-		memcpy (csv->quo, ptr, len);
-		if (len > 1)
-		    csv->quo_len = len;
-		}
+	    memcpy (csv->quo, ptr, len);
+	    if (len > 1)
+		csv->quo_len = len;
 	    }
 
 	csv->escape_char = '"';
@@ -578,12 +570,10 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 
 	if ((svp = hv_fetchs (self, "eol",            FALSE)) && *svp && SvOK (*svp)) {
 	    char *eol = SvPV (*svp, len);
-	    if (len < MAX_EOL_LEN) {
-		memcpy (csv->eol, eol, len);
-		csv->eol_len = len;
-		if (len == 1 && *csv->eol == CH_CR)
-		    csv->eol_is_cr = 1;
-		}
+	    memcpy (csv->eol, eol, len);
+	    csv->eol_len = len;
+	    if (len == 1 && *csv->eol == CH_CR)
+		csv->eol_is_cr = 1;
 	    }
 
 	if ((svp = hv_fetchs (self, "_types",         FALSE)) && *svp && SvOK (*svp)) {
@@ -821,11 +811,14 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		for (ptr2 = ptr, l = len; l; ++ptr2, --l) {
 		    byte c = *ptr2;
 
-		    if (c < csv->first_safe_char ||
-		       (csv->quote_binary && c >= 0x7f && c <= 0xa0) ||
-		       (CH_QUOTE          && c == CH_QUOTE)          ||
-		       (CH_SEP            && c == CH_SEP)            ||
-		       (csv->escape_char  && c == csv->escape_char)) {
+		    if ((CH_QUOTE          && c == CH_QUOTE)          ||
+			(CH_SEP            && c == CH_SEP)            ||
+			(csv->escape_char  && c == csv->escape_char)  ||
+			(csv->quote_binary ? c >= 0x7f && c <= 0xa0   ||
+					     c < csv->first_safe_char
+					   : c == CH_NL || c == CH_CR ||
+					     (csv->quote_space && (
+					     c == CH_SPACE || c == CH_TAB)))) {
 			/* Binary character */
 			break;
 			}
@@ -848,7 +841,7 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 		    SvREFCNT_inc (sv);
 		    csv->has_error_input = 1;
 		    unless (hv_store (csv->self, "_ERROR_INPUT", 12, sv, 0))
-/* uncovered */		SvREFCNT_dec (sv);
+			SvREFCNT_dec (sv); /* uncoverable statement memory fail */
 		    (void)SetDiag (csv, 2110);
 		    return FALSE;
 		    }
@@ -1406,7 +1399,7 @@ restart:
 		CSV_PUT_SV (c2);
 		}
 	    else
-/* uncovered */	ERROR_INSIDE_FIELD (2036); /* I think there's no way to get here */
+		ERROR_INSIDE_FIELD (2036); /* uncoverable statement I think there's no way to get here */
 	    } /* ESC char */
 	else
 	if (c == CH_NL || is_EOL (c)) {
@@ -1743,7 +1736,7 @@ static void hook (pTHX_ HV *hv, char *cb_name, AV *av)
     fprintf (stderr, "# HOOK %s %x\n", cb_name, av);
 #endif
     unless ((svp = hv_fetchs (hv, "callbacks", FALSE)) && _is_hashref (*svp))
-	return;
+	return; /* uncoverable statement defensive programming */
 
     cb  = (HV *)SvRV (*svp);
     svp = hv_fetch (cb, cb_name, strlen (cb_name), FALSE);

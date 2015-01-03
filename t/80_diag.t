@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
- use Test::More tests => 225;
+ use Test::More tests => 263;
 #use Test::More "no_plan";
 
 my %err;
@@ -141,9 +141,28 @@ $csv = Text::CSV_XS->new ({ auto_diag => 1 });
 
 {   my @warn;
     local $SIG{__WARN__} = sub { push @warn, @_ };
-    Text::CSV_XS->new ()->_cache_diag ();
+
+    # Invalid error_input calls
+    is (Text::CSV_XS::error_input (undef), undef, "Bad error_input call");
+    is (Text::CSV_XS::error_input (""),    undef, "Bad error_input call");
+    is (Text::CSV_XS::error_input ([]),    undef, "Bad error_input call");
+    is (Text::CSV_XS->error_input,         undef, "Bad error_input call");
+
+    ok (my $csv = Text::CSV_XS->new (), "new for cache diag");
+    $csv->_cache_diag ();
     ok (@warn == 1, "Got warn");
     is ($warn[0], "CACHE: invalid\n", "Uninitialized cache");
+
+    @warn = ();
+    ok ($csv->parse ("1"), "parse"); # initialize cache
+    $csv->_cache_set (987, 10);
+    ok (@warn == 1, "Got warn");
+    is ($warn[0], "Unknown cache index 987 ignored\n", "Ignore bad cache calls");
+
+    is ($csv->parse ('"'), 0, "Bad parse");
+    is ($csv->error_input, '"', "Error input");
+    ok ($csv->_cache_set (34, 0), "Reset error input (dangerous!)");
+    is ($csv->error_input, '"', "Error input not reset");
     }
 
 {   my $csv = Text::CSV_XS->new ();
@@ -158,11 +177,17 @@ foreach my $spec (
 	"row=0",	# row > 0
 	"col=0",	# col > 0
 	"cell=0",	# cell = r,c
-	"cell=0,0",	# col & row > 0
+	"cell=0,0",	# TL col > 0
+	"cell=1,0",	# TL row > 0
+	"cell=1,1;0,1",	# BR col > 0
+	"cell=1,1;1,0",	# BR row > 0
 	"row=*",	# * only after n-
 	"col=3-1",	# to >= from
 	"cell=4,1;1",	# cell has no ;
 	"cell=3,3-2,1",	# bottom-right should be right to and below top-left
+	"cell=3,3-2,*",	# bottom-right should be right to and below top-left
+	"cell=3,3-4,1",	# bottom-right should be right to and below top-left
+	"cell=3,3-*,1",	# bottom-right should be right to and below top-left
 	"cell=1,*",	# * in single cell col
 	"cell=*,1",	# * in single cell row
 	"cell=*,*",	# * in single cell row and column
@@ -184,6 +209,9 @@ foreach my $spec (
 my $diag_file = "_$$.out";
 open  EH,     ">&STDERR";
 open  STDERR, ">", $diag_file;
+# Trigger extra output for longer quote and sep
+is ($csv->sep   ("--"), "--", "set longer sep");
+is ($csv->quote ("^^"), "^^", "set longer quote");
 ok ($csv->_cache_diag,	"Cache debugging output");
 close STDERR;
 open  STDERR, ">&EH";
@@ -194,5 +222,15 @@ while (<EH>) {
     }
 close EH;
 unlink $diag_file;
+
+{   my $err = "";
+    local $SIG{__DIE__} = sub { $err = shift; };
+    ok (my $csv = Text::CSV_XS->new, "new");
+    eval { $csv->print_hr (*STDERR, {}); };
+    is (0 + $csv->error_diag, 3009, "Missing column names");
+    ok ($csv->column_names ("foo"), "set columns");
+    eval { $csv->print_hr (*STDERR, []); };
+    is (0 + $csv->error_diag, 3010, "print_hr needs a hashref");
+    }
 
 1;

@@ -1,14 +1,15 @@
 #!/usr/bin/perl -w
 
 # speed.pl: compare different versions of Text-CSV* modules
-#	   (m)'08 [07 Apr 2008] Copyright H.M.Brand 2007-2014
+#	   (m)'08 [07 Apr 2008] Copyright H.M.Brand 2007-2015
 
 require 5.006001;
 use strict;
 
 use IO::Handle;
 use Text::CSV_XS;
-use Benchmark qw(:all :hireswallclock);
+use Benchmark "timethese";
+eval { Benchmark->import (":hireswallclock"); };
 
 our $csv = Text::CSV_XS->new ({ eol => "\n" });
 

@@ -1,3 +1,9 @@
+1.13	- 2015-01-01, H.Merijn Brand
+    - Simplify code path for old perl
+    - Fix quote_binary (#RT100676)
+    - Fix csv () for hashrefs with aliased headers
+    - Update copyright to 2015
+
 1.12	- 2014-11-01, H.Merijn Brand
     * Add field number to error_diag
     * Fixed non-IO parsing multi-byte EOL
@@ -8,7 +14,7 @@
     * Fix parallel testing issue
     * Allow csv as method call (not using the object)
     * Rename quote_null to escape_null
-    * Give meaning to keep_meta_info on output
+    * Give meaning to keep_meta_info on output (RT#99941)
 
 1.11	- 2014-08-16, H.Merijn Brand
     * Fixed eof (RT#97742)
