@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.13";
+$VERSION   = "1.14";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -990,6 +990,9 @@ sub _csv_attr
     my $cboi = delete $attr{callbacks}{on_in}       ||
 	       delete $attr{on_in};
 
+    my $fltr = delete $attr{filter};
+    ref $fltr eq "HASH" or $fltr = undef;
+
     defined $attr{auto_diag} or $attr{auto_diag} = 1;
     my $csv = Text::CSV_XS->new (\%attr) or croak $last_new_err;
 
@@ -1002,6 +1005,7 @@ sub _csv_attr
 	hdrs => $hdrs,
 	key  => $key,
 	frag => $frag,
+	fltr => $fltr,
 	cbai => $cbai,
 	cbbo => $cbbo,
 	cboi => $cboi,
@@ -1065,6 +1069,7 @@ sub csv
 	}
 
     my $key = $c->{key} and $hdrs ||= "auto";
+    $c->{fltr} && grep m/\D/ => keys %{$c->{fltr}} and $hdrs ||= "auto";
     if (defined $hdrs && !ref $hdrs) {
 	if ($hdrs eq "skip") {
 	    $csv->getline ($fh); # discard;
@@ -1073,6 +1078,24 @@ sub csv
 	    my $h = $csv->getline ($fh) or return;
 	    $hdrs = [ map { $hdr{$_} || $_ } @$h ];
 	    }
+	}
+
+    if ($c->{fltr}) {
+	my %f = %{$c->{fltr}};
+	# convert headers to index
+	if (ref $hdrs) {
+	    my @hdr = @{$hdrs};
+	    for (0 .. $#hdr) {
+		exists $f{$hdr[$_]} and $f{$_ + 1} = delete $f{$hdr[$_]};
+		}
+	    }
+	$csv->callbacks (after_parse => sub {
+	    my ($csv, $r) = @_;
+	    foreach my $fld (sort keys %f) {
+		local $_ = $r->[$fld - 1];
+		$f{$fld}->() or return \"skip";
+		}
+	    });
 	}
 
     my $frag = $c->{frag};
@@ -1090,11 +1113,13 @@ sub csv
     $ref or Text::CSV_XS->auto_diag;
     $c->{cls} and close $fh;
     if ($ref and $c->{cbai} || $c->{cboi}) {
-	for (@{$ref}) {
-	    $c->{cbai} and $c->{cbai}->($csv, $_);
-	    $c->{cboi} and $c->{cboi}->($csv, $_);
+	foreach my $r (@{$ref}) {
+	    $c->{cbai} and $c->{cbai}->($csv, $r);
+	    $c->{cboi} and $c->{cboi}->($csv, $r);
 	    }
 	}
+
+    defined wantarray or return csv (in => $ref, headers => $hdrs);
     return $ref;
     } # csv
 
@@ -2385,7 +2410,7 @@ itself (e.g. C<*STDIN>), or a reference to a scalar (e.g. C<\q{1,2,"csv"}>).
 
 When used with L</out>, C<in> should be a reference to a CSV structure (AoA
 or AoH)  or a CODE-ref that returns an array-reference or a hash-reference.
-The code-ref will be invoked with no arguments and .
+The code-ref will be invoked with no arguments.
 
  my $aoa = csv (in => "file.csv");
 
@@ -2394,6 +2419,20 @@ The code-ref will be invoked with no arguments and .
 
  my $csv = [ [qw( Foo Bar )], [ 1, 2 ], [ 2, 3 ]];
  my $err = csv (in => $csv, out => "file.csv");
+
+If called in void context without the L</out> attribute, the resulting ref
+will be used as input to a subsequent call to csv:
+
+ csv (in => "file.csv", filter => { 2 => sub { length > 2 }})
+
+will be a shortcut to
+
+ csv (in => csv (in => "file.csv", filter => { 2 => sub { length > 2 }}))
+
+where, in the absence of the C<out> attribute, this is a shortcut to
+
+ csv (in  => csv (in => "file.csv", filter => { 2 => sub { length > 2 }}),
+      out => *STDOUT)
 
 =head3 out
 X<out>
@@ -2573,7 +2612,8 @@ This callback is invoked after parsing with  L</getline>  only if no  error
 occurred.  The callback is invoked with two arguments:   the current C<CSV>
 parser object and an array reference to the fields parsed.
 
-The return code of the callback is ignored.
+The return code of the callback is ignored  unless it is a reference to the
+string "skip", in which case the record will be skipped in L</getline_all>.
 
  sub add_from_db
  {
@@ -2584,6 +2624,34 @@ The return code of the callback is ignored.
 
  my $aoa = csv (in => "file.csv", callbacks => {
      after_parse => \&add_from_db });
+
+This hook can be used for validation:
+X<validation>
+
+=over 2
+
+=item FAIL
+
+Die if any of the records does not validate a rule:
+
+ after_parse => sub {
+     $_[1][4] =~ m/^[0-9]{4}\s?[A-Z]{2}$/ or
+         die "5th field does not have a valid Dutch zipcode";
+     }
+
+=item DEFAULT
+
+Replace invalid fields with a default value:
+
+ after_parse => sub { $_[1][2] =~ m/^\d+$/ or $_[1][2] = 0 }
+
+=item SKIP
+
+Skip records that have invalid fields (only applies to L</getline_all>):
+
+ after_parse => sub { $_[1][0] =~ m/^\d+$/ or return \"skip"; }
+
+=back
 
 =item before_print
 X<before_print>
@@ -2618,6 +2686,7 @@ but only feature the L</csv> function.
 
   csv (in        => "file.csv",
        callbacks => {
+           filter       => { 6 => sub { $_ > 15 } },    # first
            after_parse  => sub { say "AFTER PARSE";  }, # first
            after_in     => sub { say "AFTER IN";     }, # second
            on_in        => sub { say "ON IN";        }, # third
@@ -2634,6 +2703,28 @@ but only feature the L</csv> function.
        );
 
 =over 2
+
+=item filter
+X<filter>
+
+This callback can be used to filter records.  It is called just after a new
+record has been scanned.  The callback accepts a hashref where the keys are
+the index to the row (the field number, 1-based) and the values are subs to
+return a true or false value.
+
+ csv (in => "file.csv", filter => {
+            3 => sub { m/a/ },       # third field should contain an "a"
+            5 => sub { length > 4 }, # length of the 5th field minimal 5
+            });
+
+If the keys to the filter contain any character that in not a digit it will
+also implicitly set  L</headers> to C<auto>  unless L</headers> was already
+passed as argument.  When headers are active, returning an array of hashes,
+the filter is not applicable to the header itself.
+
+ csv (in => "file.csv", filter => { foo => sub { $_ > 4 }});
+
+All sub results should match, as in AND.
 
 =item after_in
 X<after_in>
@@ -2766,6 +2857,12 @@ Rewrite C<CSV> files with C<;> as separator character to well-formed C<CSV>:
  use Text::CSV_XS qw( csv );
  csv (in => csv (in => "bad.csv", sep_char => ";"), out => *STDOUT);
 
+As C<STDOUT> is now default in L</csv>, a one-liner converting a UTF-16 CSV
+file with BOM and TAB-separation to valid UTF-8 CSV could be:
+
+ $ perl -C3 -MText::CSV_XS=csv -we\
+    'csv(in=>"utf16tab.csv",encoding=>"utf16",sep=>"\t")' >utf8.csv
+
 =head2 Dumping database tables to CSV
 
 Dumping a database table can be simple as this (TIMTOWTDI):
@@ -2795,8 +2892,8 @@ Dumping a database table can be simple as this (TIMTOWTDI):
 For more extended examples, see the F<examples/> C<1>) sub-directory in the
 original distribution or the git repository C<2>).
 
- 1. http://repo.or.cz/w/Text-CSV_XS.git?a=tree;f=examples
- 2. http://repo.or.cz/w/Text-CSV_XS.git
+ 1. https://github.com/Tux/Text-CSV_XS/tree/master/examples
+ 2. https://github.com/Tux/Text-CSV_XS
 
 The following files can be found there:
 
@@ -2944,10 +3041,6 @@ No guarantees, but this is what I had in mind some time ago:
 =item *
 
 DIAGNOSTICS section in pod to *describe* the errors (see below)
-
-=item *
-
-Multi-byte quotation support
 
 =back
 
