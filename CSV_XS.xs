@@ -105,6 +105,7 @@
 #define CACHE_ID__has_hooks		36
 
 #define	byte	unsigned char
+#define ulng	unsigned long
 typedef struct {
     byte	quote_char;
     byte	escape_char;
@@ -137,6 +138,7 @@ typedef struct {
     byte	has_hooks;
 
     long	is_bound;
+    ulng	recno;
 
     byte *	cache;
 
@@ -1446,6 +1448,24 @@ EOLX:
 		CSV_PUT_SV (c);
 		}
 	    else {
+		/* sep=,
+		 *      ^
+		 */
+		if (csv->recno == 0 && csv->fld_idx == 1 && csv->useIO &&
+			(csv->bptr[0] == 's' || csv->bptr[0] == 'S') &&
+			(csv->bptr[1] == 'e' || csv->bptr[1] == 'E') &&
+			(csv->bptr[2] == 'p' || csv->bptr[2] == 'P') &&
+			 csv->bptr[3] == '=') {
+		    char *sep = csv->bptr + 4;
+		    int   len = csv->used - 5;
+		    if (len <= MAX_ATTR_LEN) {
+			sep[len] = (char)0;
+			memcpy (csv->sep, sep, len);
+			csv->sep_len = len == 1 ? 0 : len;
+			return Parse (csv, src, fields, fflags);
+			}
+		    }
+
 		/* ,1,"foo\n 3",,bar
 		 *                  ^
 		 */
@@ -1674,7 +1694,7 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 	}
 
     result = Parse (&csv, src, av, avf);
-    sv_inc (*(hv_fetchs (hv, "_RECNO", FALSE)));
+    hv_store (hv, "_RECNO", 6, newSViv (++csv.recno), 0);
 
     (void)hv_store (hv, "_EOF", 4, &PL_sv_no,  0);
     if (csv.useIO) {
@@ -1699,6 +1719,9 @@ static int cx_c_xsParse (pTHX_ csv_t csv, HV *hv, AV *av, AV *avf, SV *src, bool
 		}
 	    }
 	}
+    else /* just copy the cache */
+	memcpy (csv.cache, &csv, sizeof (csv_t));
+
     if (result && csv.types) {
 	I32	i;
 	STRLEN	len = av_len (av);

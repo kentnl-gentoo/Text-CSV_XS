@@ -5,7 +5,7 @@ use warnings;
 use Config;
 
 #use Test::More "no_plan";
- use Test::More tests => 40;
+ use Test::More tests => 43;
 
 BEGIN {
     use_ok "Text::CSV_XS", ("csv");
@@ -60,8 +60,12 @@ if ($] >= 5.008001) {
     is_deeply (csv (in => $file, encoding => "utf-8", headers => ["a", "b", "c"],
 		    fragment => "row=2", sep_char => ","),
 	   [{ a => 1, b => 2, c => 3 }], "AOH headers fragment");
+    is_deeply (csv (in => $file, enc      => "utf-8", headers => ["a", "b", "c"],
+		    fragment => "row=2", sep_char => ","),
+	   [{ a => 1, b => 2, c => 3 }], "AOH headers fragment");
     }
 else {
+    ok (1, q{This perl does not support open with "<:encoding(...)"});
     ok (1, q{This perl does not support open with "<:encoding(...)"});
     }
 
@@ -154,3 +158,9 @@ eval {
     ok (csv (in => [[ 1, 2, 3 ]], out => \$out), "out to scalar ref");
     is ($out, "1,2,3\r\n",	"Scalar out");
     };
+
+{   my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
+    my $expect = [["a"],[1],["a"],[1],["a"],[1],["a"],[1],["a"],[1]];
+    is_deeply ($csv->csv (in => $file),        $expect, "csv from object");
+    is_deeply (csv (in => $file, csv => $csv), $expect, "csv from attribute");
+    }

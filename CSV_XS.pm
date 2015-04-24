@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.16";
+$VERSION   = "1.17";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -814,6 +814,16 @@ sub getline_hr_all
     [ map { my %h; @h{@cn} = @$_; \%h } @{$self->getline_all (@args)} ];
     } # getline_hr_all
 
+sub say
+{
+    my ($self, $io, @f) = @_;
+    my $eol = $self->eol;
+    defined $eol && $eol ne "" or $self->eol ($\ || $/);
+    my $state = $self->print ($io, @f);
+    $self->eol ($eol);
+    return $state;
+    } # say
+
 sub print_hr
 {
     my ($self, $io, $hr) = @_;
@@ -931,7 +941,7 @@ sub _csv_attr
 
     $attr{binary} = 1;
 
-    my $enc = delete $attr{encoding} || "";
+    my $enc = delete $attr{enc} || delete $attr{encoding} || "";
     $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 
     my $fh;
@@ -994,7 +1004,8 @@ sub _csv_attr
     ref $fltr eq "HASH" or $fltr = undef;
 
     defined $attr{auto_diag} or $attr{auto_diag} = 1;
-    my $csv = Text::CSV_XS->new (\%attr) or croak $last_new_err;
+    my $csv = delete $attr{csv} || Text::CSV_XS->new (\%attr)
+	or croak $last_new_err;
 
     return {
 	csv  => $csv,
@@ -1014,7 +1025,7 @@ sub _csv_attr
 
 sub csv
 {
-    @_ && ref $_[0] eq __PACKAGE__ and shift @_;
+    @_ && ref $_[0] eq __PACKAGE__ and splice @_, 0, 0, "csv";
     @_ or croak $csv_usage;
 
     my $c = _csv_attr (@_);
@@ -1097,6 +1108,7 @@ sub csv
 		local %_;
 		@hdr and @_{@hdr} = @$r;
 		$f{$fld}->($csv, $r) or return \"skip";
+		$r->[$fld - 1] = $_;
 		}
 	    });
 	}
@@ -1305,7 +1317,8 @@ this range may or may not work as expected.  Multibyte characters, like UTF
 C<U+060C> (ARABIC COMMA),   C<U+FF0C> (FULLWIDTH COMMA),  C<U+241B> (SYMBOL
 FOR ESCAPE), C<U+2424> (SYMBOL FOR NEWLINE), C<U+FF02> (FULLWIDTH QUOTATION
 MARK), and C<U+201C> (LEFT DOUBLE QUOTATION MARK) (to give some examples of
-what might look promising) are therefore not allowed.
+what might look promising) work for newer versions of perl for C<sep_char>,
+and C<quote_char> but not for C<escape_char>.
 
 If you use perl-5.8.2 or higher these three attributes are utf8-decoded, to
 increase the likelihood of success. This way C<U+00FE> will be allowed as a
@@ -1877,6 +1890,13 @@ A short benchmark
  $csv->print ($io,  \@data  );   # 57600 recs/sec
  $csv->print ($io,   undef  );   # 48500 recs/sec
 
+=head2 say
+X<say>
+
+ $status = $csv->say ($io, $colref);
+
+Like L<C<print>|/print>, but L<C<eol>|/eol> defaults to C<$\>.
+
 =head2 print_hr
 X<print_hr>
 
@@ -1892,9 +1912,9 @@ It is just a wrapper method with basic parameter checks over
 =head2 combine
 X<combine>
 
- $status = $csv->combine (@columns);
+ $status = $csv->combine (@fields);
 
-This method constructs a C<CSV> string from C<@columns>,  returning success
+This method constructs a C<CSV> record from  C<@fields>,  returning success
 or failure.   Failure can result from lack of arguments or an argument that
 contains an invalid character.   Upon success,  L</string> can be called to
 retrieve the resultant C<CSV> string.  Upon failure,  the value returned by
@@ -2464,7 +2484,8 @@ X<encoding>
 
 If passed,  it should be an encoding accepted by the  C<:encoding()> option
 to C<open>. There is no default value. This attribute does not work in perl
-5.6.x.
+5.6.x.  C<encoding> can be abbreviated to C<enc> for ease of use in command
+line invocations.
 
 =head3 headers
 X<headers>
@@ -2740,6 +2761,16 @@ the current record will also be available in the localized C<%_>:
 
  filter => { 3 => sub { $_ > 100 && $_{foo} =~ m/A/ && $_{bar} < 1000  }}
 
+If the filter is used to I<alter> the content by changing C<$_>,  make sure
+that the sub returns true in order not to have that record skipped:
+
+ filter => { 2 => sub { $_ = uc }}
+
+will upper-case the second field, and then skip it if the resulting content
+evaluates to false. To always accept, end with truth:
+
+ filter => { 2 => sub { $_ = uc; 1 }}
+
 =item after_in
 X<after_in>
 
@@ -2770,6 +2801,21 @@ This callback acts exactly as the L</after_in> or the L</before_out> hooks.
 
 This callback can also be passed as an attribute  without the  C<callbacks>
 wrapper.
+
+=item csv
+
+The I<function>  L</csv> can also be called as a method or with an existing
+Text::CSV_XS object. This could help if the function is to be invoked a lot
+of times and the overhead of creating the object internally over  and  over
+again would be prevented by passing an existing instance.
+
+ my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
+
+ my $aoa = $csv->csv (in => $fh);
+ my $aoa = csv (in => $fh, csv => $csv);
+
+both act the same. Running this 20000 times on a 20 lines CSV file,  showed
+a 53% speedup.
 
 =back
 
@@ -2966,6 +3012,12 @@ for Dutch, German and Spanish (and probably some others as well).   For the
 English locale,  the default is a comma.   In Windows however,  the user is
 free to choose a  predefined locale,  and then change  I<every>  individual
 setting in it, so checking the locale is no solution.
+
+As of version 1.17, a lone first line with just
+
+  sep=;
+
+will be recognized and honored when parsing with L</getline>.
 
 =head1 TODO
 
@@ -3352,6 +3404,9 @@ X<3010>
 L<IO::File>,  L<IO::Handle>,  L<IO::Wrap>,  L<Text::CSV>,  L<Text::CSV_PP>,
 L<Text::CSV::Encoded>,     L<Text::CSV::Separator>,    L<Text::CSV::Slurp>,
 L<Spreadsheet::CSV> and L<Spreadsheet::Read>, and of course L<perl>.
+
+If you are using perl6,  you can have a look at  C<Text::CSV>  in the perl6
+ecosystem, offering the same features.
 
 =head3 non-perl
 
