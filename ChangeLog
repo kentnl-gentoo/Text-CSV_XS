@@ -1,9 +1,15 @@
+1.18	- 2015-05-22, H.Merijn Brand
+    * Add quote_empty attribute
+    * Add database NULL documentation
+    * Inherit csv attributes in csv () when called in void context
+    * micro-optimisation for combine/print (empty fields will be faster)
+
 1.17	- 2015-04-24, H.Merijn Brand
-    - Enable overruling $csv in csv ()
-    - Allow encoding to be shortened to enc in csv ()
-    - Allow filter to alter content
-    - Add say (print with default eol => $\)
-    - Allow MS sep=; on first line (RT#100304)
+    * Enable overruling $csv in csv ()
+    * Allow encoding to be shortened to enc in csv ()
+    * Allow filter to alter content
+    * Add say (print with default eol => $\)
+    * Allow MS sep=; on first line (RT#100304)
 
 1.16	- 2015-03-02, H.Merijn Brand
     * filter made more useful (access to other fields)

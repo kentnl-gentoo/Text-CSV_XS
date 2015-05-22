@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.17";
+$VERSION   = "1.18";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -71,6 +71,7 @@ my %def_attr = (
     allow_loose_escapes		=> 0,
     allow_unquoted_escape	=> 0,
     always_quote		=> 0,
+    quote_empty			=> 0,
     quote_space			=> 1,
     escape_null			=> 1,
     quote_binary		=> 1,
@@ -227,7 +228,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     quote_char			=>  0,
     escape_char			=>  1,
     sep_char			=>  2,
-    sep				=> 38,	# 38 .. 54
+    sep				=> 39,	# 39 .. 55
     binary			=>  3,
     keep_meta_info		=>  4,
     always_quote		=>  5,
@@ -243,6 +244,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     auto_diag			=> 24,
     diag_verbose		=> 33,
     quote_space			=> 25,
+    quote_empty			=> 37,
     escape_null			=> 31,
     quote_binary		=> 32,
     decode_utf8			=> 35,
@@ -388,6 +390,13 @@ sub quote_space
     @_ and $self->_set_attr_X ("quote_space", shift);
     $self->{quote_space};
     } # quote_space
+
+sub quote_empty
+{
+    my $self = shift;
+    @_ and $self->_set_attr_X ("quote_empty", shift);
+    $self->{quote_empty};
+    } # quote_empty
 
 sub escape_null
 {
@@ -1009,6 +1018,7 @@ sub _csv_attr
 
     return {
 	csv  => $csv,
+	attr => { %attr },
 	fh   => $fh,
 	cls  => $cls,
 	in   => $in,
@@ -1134,7 +1144,9 @@ sub csv
 	    }
 	}
 
-    defined wantarray or return csv (in => $ref, headers => $hdrs);
+    defined wantarray or
+	return csv (%{$c->{attr}}, in => $ref, headers => $hdrs, %{$c->{attr}});
+
     return $ref;
     } # csv
 
@@ -1702,6 +1714,18 @@ this to be forced in C<CSV>,  nor any for the opposite, the default is true
 for safety.   You can exclude the space  from this trigger  by setting this
 attribute to 0.
 
+=item quote_empty
+X<quote_empty>
+
+ my $csv = Text::CSV_XS->new ({ quote_empty => 1 });
+         $csv->quote_empty (0);
+ my $f = $csv->quote_empty;
+
+By default the generated fields are quoted only if they I<need> to be.   An
+empty (defined) field does not need quotation. If you set this attribute to
+C<1> then I<empty> defined fields will be quoted.  (C<undef> fields are not
+quoted, see L</blank_is_undef>). See also L<C<always_quote>|/always_quote>.
+
 =item escape_null or quote_null (deprecated)
 X<escape_null>
 X<quote_null>
@@ -1830,6 +1854,7 @@ is equivalent to
      allow_loose_escapes   => 0,
      allow_unquoted_escape => 0,
      always_quote          => 0,
+     quote_empty           => 0,
      quote_space           => 1,
      escape_null           => 1,
      quote_binary          => 1,
@@ -2474,10 +2499,10 @@ reference to a glob (e.g. C<\*STDOUT>), or the glob itself (e.g. C<*STDOUT>).
  csv (in => sub { $sth->fetchrow_hashref }, out => "dump.csv",
       headers => $sth->{NAME_lc});
 
-When a  code-ref  is used,  the output is generated  per invocation,  so no
-buffering is involved.  This implies that there is no  size restriction  on
-the number of records.  The function ends  when the coderef returns a false
-value.
+When a code-ref is used for C<in>, the output is generated  per invocation,
+so no buffering is involved. This implies that there is no size restriction
+on the number of records. The C<csv> function ends when the coderef returns
+a false value.
 
 =head3 encoding
 X<encoding>
@@ -2946,6 +2971,33 @@ Dumping a database table can be simple as this (TIMTOWTDI):
  my $sth = $dbh->prepare ($sql); $sth->execute;
  csv (out => "foo.csv", in => sub { $sth->fetch            });
  csv (out => "foo.csv", in => sub { $sth->fetchrow_hashref });
+
+Note that this does not discriminate between "empty" values and NULL-values
+from the database,  as both will be the same empty field in CSV.  To enable
+distinction between the two, use L<C<quote_empty>|/quote_empty>.
+
+ csv (out => "foo.csv", in => sub { $sth->fetch }, quote_empty => 1);
+
+If the database import utility supports special sequences to insert C<NULL>
+values into the database,  like MySQL/MariaDB supports C<\N>,  use a filter
+or a map
+
+ csv (out => "foo.csv", in => sub { $sth->fetch },
+                     on_in => sub { $_ //= "\\N" for @$_[1] });
+
+ while (my $row = $sth->fetch) {
+     $csv->print ($fh, [ map { $_ // "\\N" } @$row ]);
+     }
+
+these special sequences are not recognized by  Text::CSV_XS  on parsing the
+CSV generated like this, but map and filter are your friends again
+
+ while (my $row = $csv->getline ($io)) {
+     $sth->execute (map { $_ eq "\\N" ? undef : $_ } @$row);
+     }
+
+ csv (in => "foo.csv", filter => { 1 => sub {
+     $sth->execute (map { $_ eq "\\N" ? undef : $_ } @{$_[1]}); 0; }});
 
 =head2 The examples folder
 
