@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.18";
+$VERSION   = "1.19";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -212,7 +212,7 @@ sub new
 	return;
 	}
     if (defined $self->{callbacks} && ref $self->{callbacks} ne "HASH") {
-	warn "The 'callbacks' attribute is set but is not a hash: ignored\n";
+	carp "The 'callbacks' attribute is set but is not a hash: ignored\n";
 	$self->{callbacks} = undef;
 	}
 
@@ -430,7 +430,12 @@ sub decode_utf8
 sub keep_meta_info
 {
     my $self = shift;
-    @_ and $self->_set_attr_X ("keep_meta_info", shift);
+    if (@_) {
+	my $v = shift;
+	!defined $v || $v eq "" and $v = 0;
+	$v =~ m/^[0-9]/ or $v = lc $v eq "false" ? 0 : 1; # true/truth = 1
+	$self->_set_attr_X ("keep_meta_info", $v);
+	}
     $self->{keep_meta_info};
     } # keep_meta_info
 
@@ -534,7 +539,7 @@ sub types
     my $self = shift;
     if (@_) {
 	if (my $types = shift) {
-	    $self->{_types} = join "", map { chr $_ } @{$types};
+	    $self->{_types} = join "", map { chr } @{$types};
 	    $self->{types}  = $types;
 	    }
 	else {
@@ -555,7 +560,7 @@ sub callbacks
 	my $cb;
 	my $hf = 0x00;
 	if (defined $_[0]) {
-	    grep { !defined $_ } @_ and croak ($self->SetDiag (1004));
+	    grep { !defined } @_ and croak ($self->SetDiag (1004));
 	    $cb = @_ == 1 && ref $_[0] eq "HASH" ? shift
 	        : @_ % 2 == 0                    ? { @_ }
 	        : croak ($self->SetDiag (1004));
@@ -1112,13 +1117,13 @@ sub csv
 		}
 	    }
 	$csv->callbacks (after_parse => sub {
-	    my ($csv, $r) = @_;
-	    foreach my $fld (sort keys %f) {
-		local $_ = $r->[$fld - 1];
+	    my ($CSV, $ROW) = @_; # lexical sub-variables in caps
+	    foreach my $FLD (sort keys %f) {
+		local $_ = $ROW->[$FLD - 1];
 		local %_;
-		@hdr and @_{@hdr} = @$r;
-		$f{$fld}->($csv, $r) or return \"skip";
-		$r->[$fld - 1] = $_;
+		@hdr and @_{@hdr} = @$ROW;
+		$f{$FLD}->($CSV, $ROW) or return \"skip";
+		$ROW->[$FLD - 1] = $_;
 		}
 	    });
 	}
@@ -3001,8 +3006,8 @@ CSV generated like this, but map and filter are your friends again
 
 =head2 The examples folder
 
-For more extended examples, see the F<examples/> C<1>) sub-directory in the
-original distribution or the git repository C<2>).
+For more extended examples, see the F<examples/> C<1>. sub-directory in the
+original distribution or the git repository C<2>.
 
  1. https://github.com/Tux/Text-CSV_XS/tree/master/examples
  2. https://github.com/Tux/Text-CSV_XS

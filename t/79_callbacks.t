@@ -15,6 +15,7 @@ BEGIN {
 $| = 1;
 
 my $csv;
+my $tfn = "_79test.csv"; END { -f $tfn and unlink $tfn; }
 
 # These tests are for the constructor
 {   my $warn;
@@ -23,22 +24,22 @@ my $csv;
     is ($warn, undef,			"no warn for undef");
     is ($csv->callbacks, $warn = undef,	"no callbacks for undef");
     ok ($csv = Text::CSV_XS->new ({ callbacks => 0	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for 0");
+    like ($warn, qr{: ignored\n},	"warn for 0");
     is ($csv->callbacks, $warn = undef,	"no callbacks for 0");
     ok ($csv = Text::CSV_XS->new ({ callbacks => 1	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for 1");
+    like ($warn, qr{: ignored\n},	"warn for 1");
     is ($csv->callbacks, $warn = undef,	"no callbacks for 1");
     ok ($csv = Text::CSV_XS->new ({ callbacks => \1	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for \\1");
+    like ($warn, qr{: ignored\n},	"warn for \\1");
     is ($csv->callbacks, $warn = undef,	"no callbacks for \\1");
     ok ($csv = Text::CSV_XS->new ({ callbacks => ""	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for ''");
+    like ($warn, qr{: ignored\n},	"warn for ''");
     is ($csv->callbacks, $warn = undef,	"no callbacks for ''");
     ok ($csv = Text::CSV_XS->new ({ callbacks => []	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for []");
+    like ($warn, qr{: ignored\n},	"warn for []");
     is ($csv->callbacks, $warn = undef,	"no callbacks for []");
     ok ($csv = Text::CSV_XS->new ({ callbacks => sub {}	}),	"new");
-    like ($warn, qr{: ignored$},	"warn for sub {}");
+    like ($warn, qr{: ignored\n},	"warn for sub {}");
     is ($csv->callbacks, $warn = undef,	"no callbacks for sub {}");
     }
 
@@ -125,17 +126,14 @@ is_deeply ($row, [ 1, 2, 3, "NEW" ],	"fetch + value from hook");
 $error = 2012; # EOF
 ok ($csv->getline (*DATA),		"parse past eof");
 
-my $fn = "_79test.csv";
-END { unlink $fn; }
-
 ok ($csv->eol ("\n"), "eol for output");
-open my $fh, ">", $fn or die "$fn: $!";
+open my $fh, ">", $tfn or die "$tfn: $!";
 ok ($csv->print ($fh, [ 0, "foo"    ]), "print OK");
 ok ($csv->print ($fh, [ 0, "bar", 3 ]), "print too many");
 ok ($csv->print ($fh, [ 0           ]), "print too few");
 close $fh;
 
-open $fh, "<", $fn or die "$fn: $!";
+open $fh, "<", $tfn or die "$tfn: $!";
 is (do { local $/; <$fh> }, "1,foo\n2,bar\n3,\n", "Modified output");
 close $fh;
 
@@ -148,10 +146,10 @@ is ($csv->string, qq{11,fri,22,18\n},			"string");
 
 is ($csv->callbacks (undef), undef,			"clear callbacks");
 
-is_deeply (Text::CSV_XS::csv (in => $fn, callbacks => $callbacks),
+is_deeply (Text::CSV_XS::csv (in => $tfn, callbacks => $callbacks),
     [[1,"foo","NEW"],[2,"bar","NEW"],[3,"","NEW"]], "using getline_all");
 
-open $fh, ">", $fn;
+open $fh, ">", $tfn or die "$tfn: $!\n";
 print $fh <<"EOC";
 1,foo
 2,bar
@@ -160,7 +158,7 @@ print $fh <<"EOC";
 EOC
 close $fh;
 
-open $fh, "<", $fn;
+open $fh, "<", $tfn or die "$tfn: $!\n";
 $csv->callbacks (after_parse => sub { $_[1][0] eq 3 and return \"skip" });
 is_deeply ($csv->getline_all ($fh), [[1,"foo"],[2,"bar"],[4,"zoo"]]);
 close $fh;

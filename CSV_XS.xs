@@ -175,7 +175,7 @@ typedef struct {
 #define bool_opt(o) bool_opt_def (o, 0)
 #define num_opt_def(o,d) \
     (((svp = hv_fetchs (self, o, FALSE)) && *svp) ? SvIV   (*svp) : d)
-#define num_opt(o) bool_opt_def (o, 0)
+#define num_opt(o)  num_opt_def  (o, 0)
 
 typedef struct {
     int   xs_errno;
@@ -600,7 +600,6 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 
 	csv->binary			= bool_opt ("binary");
 	csv->decode_utf8		= bool_opt ("decode_utf8");
-	csv->keep_meta_info		= bool_opt ("keep_meta_info");
 	csv->always_quote		= bool_opt ("always_quote");
 	csv->quote_empty		= bool_opt ("quote_empty");
 	csv->quote_space		= bool_opt_def ("quote_space",  1);
@@ -616,6 +615,7 @@ static void cx_SetupCsv (pTHX_ csv_t *csv, HV *self, SV *pself)
 
 	csv->auto_diag			= num_opt ("auto_diag");
 	csv->diag_verbose		= num_opt ("diag_verbose");
+	csv->keep_meta_info		= num_opt ("keep_meta_info");
 
 	sv_cache = newSVpvn ((char *)csv, sizeof (csv_t));
 	csv->cache = (byte *)SvPVX (sv_cache);
@@ -769,7 +769,7 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 
     if (kmi >= 10) {
 	SV **svp;
-	if ((svp = hv_fetchs (csv->self, "_FFLAGS", FALSE)) && *svp) {
+	if ((svp = hv_fetchs (csv->self, "_FFLAGS", FALSE)) && _is_arrayref (*svp)) {
 	    AV *avp = (AV *)SvRV (*svp);
 	    if (avp && av_len (avp) >= n)
 		qm = avp;
@@ -829,11 +829,11 @@ static int cx_Combine (pTHX_ csv_t *csv, SV *dst, AV *fields)
 			if ((CH_QUOTE          && c == CH_QUOTE)          ||
 			    (CH_SEP            && c == CH_SEP)            ||
 			    (csv->escape_char  && c == csv->escape_char)  ||
-			    (csv->quote_binary ? c >= 0x7f && c <= 0xa0   ||
-						 c < csv->first_safe_char
-					       : c == CH_NL || c == CH_CR ||
+			    (csv->quote_binary ? (c >= 0x7f && c <= 0xa0) ||
+						  c < csv->first_safe_char
+					       :  c == CH_NL || c == CH_CR ||
 						 (csv->quote_space && (
-						 c == CH_SPACE || c == CH_TAB)))) {
+						  c == CH_SPACE || c == CH_TAB)))) {
 			    /* Binary character */
 			    break;
 			    }
