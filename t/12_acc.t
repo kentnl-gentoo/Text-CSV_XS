@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 180;
+use Test::More tests => 189;
 
 BEGIN {
     use_ok "Text::CSV_XS";
@@ -16,9 +16,9 @@ ok ($csv = Text::CSV_XS->new,				"new ()");
 is ($csv->quote_char,			'"',		"quote_char");
 is ($csv->quote,			'"',		"quote");
 is ($csv->escape_char,			'"',		"escape_char");
-is ($csv->sep_char,			',',		"sep_char");
-is ($csv->sep,				',',		"sep");
-is ($csv->eol,				'',		"eol");
+is ($csv->sep_char,			",",		"sep_char");
+is ($csv->sep,				",",		"sep");
+is ($csv->eol,				"",		"eol");
 is ($csv->always_quote,			0,		"always_quote");
 is ($csv->binary,			0,		"binary");
 is ($csv->keep_meta_info,		0,		"keep_meta_info");
@@ -45,11 +45,12 @@ ok ($csv->combine (@fld),				"combine");
 is ($csv->string,
     qq{"txt =, ""Hi!""",Yes,,2,,1.09,"\r",},	"string");
 
-is ($csv->sep_char (";"),		';',		"sep_char (;)");
-is ($csv->sep (";"),			';',		"sep (;)");
-is ($csv->sep_char (),			';',		"sep_char ()");
-is ($csv->quote_char ("="),		'=',		"quote_char (=)");
-is ($csv->quote ("="),			'=',		"quote (=)");
+is ($csv->sep_char (";"),		";",		"sep_char (;)");
+is ($csv->sep (";"),			";",		"sep (;)");
+is ($csv->sep_char (),			";",		"sep_char ()");
+is ($csv->quote_char ("="),		"=",		"quote_char (=)");
+is ($csv->quote (undef),		"",		"quote (undef)");
+is ($csv->quote ("="),			"=",		"quote (=)");
 is ($csv->eol (undef),			"",		"eol (undef)");
 is ($csv->eol (""),			"",		"eol ('')");
 is ($csv->eol ("\r"),			"\r",		"eol (\\r)");
@@ -136,9 +137,14 @@ $csv->binary (1);
 ok ( $csv->parse ("foo,foo\0bar"),		"parse (foo)");
 
 # Attribute aliasses
-ok ($csv = Text::CSV_XS-> new ({ quote_always => 1, verbose_diag => 1}));
+ok ($csv = Text::CSV_XS->new ({ quote_always => 1, verbose_diag => 1}));
 is ($csv->always_quote, 1,	"always_quote = quote_always");
 is ($csv->diag_verbose, 1,	"diag_verbose = verbose_diag");
+ok ($csv = Text::CSV_XS->new ({ quote => undef, sep => undef }), "undef aliases");
+is ($csv->sep_char,   undef,	"sep_char is undef");
+is ($csv->sep,        undef,	"sep is undef");
+is ($csv->quote_char, undef,	"quote_char is undef");
+is ($csv->quote,      undef,	"quote is undef");
 
 # Some forbidden combinations
 foreach my $ws (" ", "\t") {
@@ -212,5 +218,23 @@ foreach my $arg (undef, 0, "", " ", 1, [], [ 0 ], *STDOUT) {
     is  (Text::CSV_XS->new ($arg),         undef,	"Illegal type for first arg");
     is ((Text::CSV_XS::error_diag)[0], 1000, "Should be a hashref - numeric error");
     }
+
+my $attr = [ sort qw(
+    eol
+    sep_char sep quote_char quote escape_char
+    binary decode_utf8
+    auto_diag diag_verbose
+    blank_is_undef empty_is_undef
+    allow_whitespace allow_loose_quotes allow_loose_escapes allow_unquoted_escape
+    always_quote quote_space quote_empty quote_binary
+    escape_null
+    keep_meta_info
+    verbatim
+    types
+    callbacks
+    )];
+is_deeply ([ Text::CSV_XS::known_attributes () ],      $attr, "Known attributes (function)");
+is_deeply ([ Text::CSV_XS->known_attributes () ],      $attr, "Known attributes (class method)");
+is_deeply ([ Text::CSV_XS->new->known_attributes () ], $attr, "Known attributes (method)");
 
 1;
