@@ -1,4 +1,4 @@
-/*  Copyright (c) 2007-2015 H.Merijn Brand.  All rights reserved.
+/*  Copyright (c) 2007-2016 H.Merijn Brand.  All rights reserved.
  *  Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
  *  This program is free software; you can redistribute it and/or
  *  modify it under the same terms as Perl itself.
@@ -181,7 +181,7 @@ typedef struct {
     int   xs_errno;
     char *xs_errstr;
     } xs_error_t;
-xs_error_t xs_errors[] =  {
+static const xs_error_t xs_errors[] =  {
 
     /* Generic errors */
     { 1000, "INI - constructor failed"						},
@@ -1259,7 +1259,7 @@ restart:
 			continue;
 			}
 
-		    if (csv->allow_loose_escapes) {
+		    if (csv->allow_loose_escapes && c2 != CH_CR) {
 			/* ,1,"foo, 3"56",,bar,\r\n
 			 *            ^
 			 */

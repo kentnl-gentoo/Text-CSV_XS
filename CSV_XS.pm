@@ -1,6 +1,6 @@
 package Text::CSV_XS;
 
-# Copyright (c) 2007-2015 H.Merijn Brand.  All rights reserved.
+# Copyright (c) 2007-2016 H.Merijn Brand.  All rights reserved.
 # Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
 # Copyright (c) 1997 Alan Citterman.       All rights reserved.
 #
@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.20";
+$VERSION   = "1.21";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -1098,6 +1098,8 @@ sub csv
 	    ref $hdrs || $hdrs eq "auto" and
 		$csv->print ($fh, [ map { $hdr{$_} || $_ } @hdrs ]);
 	    for (@{$in}) {
+		local %_;
+		*_ = $_;
 		$c->{cboi} and $c->{cboi}->($csv, $_);
 		$c->{cbbo} and $c->{cbbo}->($csv, $_);
 		$csv->print ($fh, [ @{$_}{@hdrs} ]);
@@ -1158,6 +1160,8 @@ sub csv
     $c->{cls} and close $fh;
     if ($ref and $c->{cbai} || $c->{cboi}) {
 	foreach my $r (@{$ref}) {
+	    local %_;
+	    ref $r eq "HASH" and *_ = $r;
 	    $c->{cbai} and $c->{cbai}->($csv, $r);
 	    $c->{cboi} and $c->{cboi}->($csv, $r);
 	    }
@@ -2460,13 +2464,6 @@ can get to the error using the class call to L</error_diag>
  my $aoa = csv (in => "test.csv") or
      die Text::CSV_XS->error_diag;
 
-Alternative invocations:
-
- my $aoa = Text::CSV_XS::csv (in => "file.csv");
-
- my $csv = Text::CSV_XS->new ();
- my $aoa = $csv->csv (in => "file.csv"); # ignore object attributes
-
 This function takes the arguments as key-value pairs. This can be passed as
 a list or as an anonymous hash:
 
@@ -2488,6 +2485,21 @@ The option that is always set and cannot be altered is
 As this function will likely be used in one-liners,  it allows  C<quote> to
 be abbreviated as C<quo>,  and  C<escape_char> to be abbreviated as  C<esc>
 or C<escape>.
+
+Alternative invocations:
+
+ my $aoa = Text::CSV_XS::csv (in => "file.csv");
+
+ my $csv = Text::CSV_XS->new ();
+ my $aoa = $csv->csv (in => "file.csv");
+
+In the latter case, the object attributes are used from the existing object
+and the attribute arguments in the function call are ignored:
+
+ my $csv = Text::CSV_XS->new ({ sep_char => ";" });
+ my $aoa = $csv->csv (in => "file.csv", sep_char => ",");
+
+will parse using C<;> as C<sep_char>, not C<,>.
 
 =head3 in
 X<in>
@@ -2860,6 +2872,9 @@ reference to an ARRAY as determined by the arguments.
 This callback can also be passed as an attribute  without the  C<callbacks>
 wrapper.
 
+This callback makes the row available in C<%_> if the row is a hashref.  In
+this case C<%_> is writable and will change the original row.
+
 =item on_in
 X<on_in>
 
@@ -2867,6 +2882,25 @@ This callback acts exactly as the L</after_in> or the L</before_out> hooks.
 
 This callback can also be passed as an attribute  without the  C<callbacks>
 wrapper.
+
+This callback makes the row available in C<%_> if the row is a hashref.  In
+this case C<%_> is writable and will change the original row. So e.g. with
+
+  my $aoh = csv (
+      in      => \"foo\n1\n2\n",
+      headers => "auto",
+      on_in   => sub { $_{bar} = 2; },
+      );
+
+C<$aoh> will be:
+
+  [ { foo => 1,
+      bar => 2,
+      }
+    { foo => 2,
+      bar => 2,
+      }
+    ]
 
 =item csv
 
@@ -3526,7 +3560,7 @@ L</csv> function. See ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
- Copyright (C) 2007-2015 H.Merijn Brand.  All rights reserved.
+ Copyright (C) 2007-2016 H.Merijn Brand.  All rights reserved.
  Copyright (C) 1998-2001 Jochen Wiedmann. All rights reserved.
  Copyright (C) 1997      Alan Citterman.  All rights reserved.
 
