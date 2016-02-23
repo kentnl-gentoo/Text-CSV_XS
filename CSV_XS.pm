@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.21";
+$VERSION   = "1.22";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -791,6 +791,84 @@ sub column_names
     $self->{_COLUMN_NAMES} = [ map { defined $_ ? $_ : "\cAUNDEF\cA" } @keys ];
     @{$self->{_COLUMN_NAMES}};
     } # column_names
+
+sub header
+{
+    my ($self, $fh, @args) = @_;
+    my (@seps, %args);
+    for (@args) {
+	if (ref $_ eq "ARRAY") {
+	    push @seps, @$_;
+	    next;
+	    }
+	if (ref $_ eq "HASH") {
+	    %args = %$_;
+	    next;
+	    }
+	croak (q{usage: $csv->headers ($fh, [ seps ], { options })});
+	}
+
+    defined $args{detect_bom}         or $args{detect_bom}         = 1;
+    defined $args{munge_column_names} or $args{munge_column_names} = "lc";
+    defined $args{set_column_names}   or $args{set_column_names}   = 1;
+
+    defined $args{sep_set} && ref $args{sep_set} eq "ARRAY" and
+	@seps =  @{$args{sep_set}};
+
+    my $hdr = <$fh>;
+    defined $hdr && $hdr ne "" or croak ($self->SetDiag (1010));
+
+    my %sep;
+    @seps or @seps = (",", ";");
+    foreach my $sep (@seps) {
+	index ($hdr, $sep) >= 0 and $sep{$sep}++;
+	}
+
+    keys %sep >= 2 and croak ($self->SetDiag (1011));
+
+    $self->sep (keys %sep);
+    my $enc = "";
+    if ($args{detect_bom}) { # UTF-7 is not supported
+	   if ($hdr =~ s/^\x00\x00\xfe\xff//) { $enc = "utf-32be"   }
+	elsif ($hdr =~ s/^\xff\xfe\x00\x00//) { $enc = "utf-32le"   }
+	elsif ($hdr =~ s/^\xfe\xff//)         { $enc = "utf-16be"   }
+	elsif ($hdr =~ s/^\xff\xfe//)         { $enc = "utf-16le"   }
+	elsif ($hdr =~ s/^\xef\xbb\xbf//)     { $enc = "utf-8"      }
+	elsif ($hdr =~ s/^\xf7\x64\x4c//)     { $enc = "utf-1"      }
+	elsif ($hdr =~ s/^\xdd\x73\x66\x73//) { $enc = "utf-ebcdic" }
+	elsif ($hdr =~ s/^\x0e\xfe\xff//)     { $enc = "scsu"       }
+	elsif ($hdr =~ s/^\xfb\xee\x28//)     { $enc = "bocu-1"     }
+	elsif ($hdr =~ s/^\x84\x31\x95\x33//) { $enc = "gb-18030"   }
+
+	if ($enc) {
+	    if ($enc =~ m/([13]).le$/) {
+		my $l = 0 + $1;
+		my $x;
+		$hdr .= "\0" x $l;
+		read $fh, $x, $l;
+		}
+	    $enc = ":encoding($enc)";
+	    binmode $fh, $enc;
+	    }
+	}
+
+    $args{munge_column_names} eq "lc" and $hdr = lc $hdr;
+    $args{munge_column_names} eq "uc" and $hdr = uc $hdr;
+
+    my $hr = \$hdr; # Will cause croak on perl-5.6.x
+    open my $h, "<$enc", $hr;
+    my $row = $self->getline ($h) or croak;
+    close $h;
+
+    my @hdr = @$row   or  croak ($self->SetDiag (1010));
+    ref $args{munge_column_names} eq "CODE" and
+	@hdr = map { $args{munge_column_names}->($_) } @hdr;
+    my %hdr = map { $_ => 1 } @hdr;
+    exists $hdr{""}   and croak ($self->SetDiag (1012));
+    keys %hdr == @hdr or  croak ($self->SetDiag (1013));
+    $args{set_column_names} and $self->column_names (@hdr);
+    wantarray ? @hdr : $self;
+    } # header
 
 sub bind_columns
 {
@@ -1596,13 +1674,17 @@ is read as
 
  ("1", "", "", " ", "2")
 
-When I<writing> C<CSV> files with L<C<always_quote>|/always_quote> set, the
-unquoted I<empty> field is the result of an undefined value. To enable this
-distinction when I<reading> C<CSV> data,  the  C<blank_is_undef>  attribute
-will cause unquoted empty fields to be set to  C<undef>,  causing the above
-to be parsed as
+When I<writing>  C<CSV> files with either  L<C<always_quote>|/always_quote>
+or  L<C<quote_empty>|/quote_empty> set, the unquoted  I<empty> field is the
+result of an undefined value.   To enable this distinction when  I<reading>
+C<CSV>  data,  the  C<blank_is_undef>  attribute will cause  unquoted empty
+fields to be set to C<undef>, causing the above to be parsed as
 
  ("1", "", undef, " ", "2")
+
+note that this is specifically important when loading  C<CSV> fields into a
+database that allows C<NULL> values,  as the perl equivalent for C<NULL> is
+C<undef> in L<DBI> land.
 
 =head3 empty_is_undef
 X<empty_is_undef>
@@ -2214,6 +2296,121 @@ the 2nd field, and C<< $hr->{name} >> to the 4th field,  discarding the 3rd
 field.
 
 L</column_names> croaks on invalid arguments.
+
+=head2 header
+
+This method does NOT work in perl-5.6.x
+
+Parse the CSV header and set L<C<sep>|/sep>, column_names and encoding.
+
+ my @hdr = $csv->header ($fh);
+ $csv->header ($fh, { sep_set => [ ";", ",", "|", "\t" ] });
+ $csv->header ($fh, { detect_bom => 1, munge_column_names => "lc" });
+
+The first argument should be a file handle.
+
+Assuming that the file opened for parsing has a header, and the header does
+not contain problematic characters like embedded newlines,   read the first
+line from the open handle then auto-detect whether the header separates the
+column names with a character from the allowed separator list.
+
+If any of the allowed separators matches,  and none of the I<other> allowed
+separators match,  set  L<C<sep>|/sep>  to that  separator  for the current
+CSV_XS instance and use it to parse the first line, map those to lowercase,
+and use that to set the instance L</column_names>:
+
+ my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
+ open my $fh, "<", "file.csv";
+ binmode $fh; # for Windows
+ $csv->header ($fh);
+ while (my $row = $csv->getline_hr ($fh)) {
+     ...
+     }
+
+If the header is empty,  contains more than one unique separator out of the
+allowed set,  contains empty fields,   or contains identical fields  (after
+folding), it will croak with error 1010, 1011, 1012, or 1013 respectively.
+
+If the header contains embedded newlines or is not valid  CSV  in any other
+way, this method will croak and leave the parse error untouched.
+
+A successful call to C<header>  will always set the  L<C<sep>|/sep>  of the
+C<$csv> object. This behavior can not be disabled.
+
+=head3 return value
+
+On error this method will croak.
+
+In list context,  the headers will be returned whether they are used to set
+L</column_names> or not.
+
+In scalar context, the instance itself is returned.  B<Note>: the values as
+found in the header will effectively be  B<lost> if  C<set_column_names> is
+false.
+
+=head3 Options
+
+=over 2
+
+=item sep_set
+
+ $csv->header ($fh, { sep_set => [ ";", ",", "|", "\t" ] });
+
+The list of legal separators defaults to C<[ ";", "," ]> and can be changed
+by this option.  As this is probably the most often used option,  it can be
+passed on its own as an unnamed argument:
+
+ $csv->header ($fh, [ ";", ",", "|", "\t", "::", "\x{2063}" ]);
+
+Multi-byte  sequences are allowed,  both multi-character and  Unicode.  See
+L<C<sep>|/sep>.
+
+=item detect_bom
+
+ $csv->header ($fh, { detect_bom => 1 });
+
+The default behavior is to detect if the header line starts with a BOM.  If
+the header has a BOM, use that to set the encoding of C<$fh>.  This default
+behavior can be disabled by passing a false value to C<detect_bom>.
+
+Supported encodings from BOM are: UTF-8, UTF-16BE, UTF-16LE, UTF-32BE,  and
+UTF-32LE. BOM's also support UTF-1, UTF-EBCDIC, SCSU, BOCU-1,  and GB-18030
+but L<Encode> does not (yet). UTF-7 is not supported.
+
+The encoding is set using C<binmode> on C<$fh>.
+
+If the handle was opened in a (correct) encoding,  this method will  B<not>
+alter the encoding, as it checks the leading B<bytes> of the first line.
+
+=item munge_column_names
+
+This option offers the means to modify the column names into something that
+is most useful to the application.   The default is to map all column names
+to lower case.
+
+ $csv->header ($fh, { munge_column_names => "lc" });
+
+The following values are available:
+
+  lc   - lower case
+  uc   - upper case
+  none - do not change
+  \&cb - supply a callback
+
+ $csv->header ($fh, { munge_column_names => sub { fc } });
+ $csv->header ($fh, { munge_column_names => sub { "column_".$col++ } });
+ $csv->header ($fh, { munge_column_names => sub { lc (shift =~ s/\W+/_/gr) } });
+
+=item set_column_names
+
+ $csv->header ($fh, { set_column_names => 1 });
+
+The default is to set the instances column names using  L</column_names> if
+the method is successful,  so subsequent calls to L</getline_hr> can return
+a hash. Disable setting the header can be forced by using a false value for
+this option.
+
+=back
 
 =head2 bind_columns
 X<bind_columns>
@@ -3058,7 +3255,7 @@ values into the database,  like MySQL/MariaDB supports C<\N>,  use a filter
 or a map
 
  csv (out => "foo.csv", in => sub { $sth->fetch },
-                     on_in => sub { $_ //= "\\N" for @$_[1] });
+                     on_in => sub { $_ //= "\\N" for @{$_[1]} });
 
  while (my $row = $sth->fetch) {
      $csv->print ($fh, [ map { $_ // "\\N" } @$row ]);
@@ -3368,6 +3565,32 @@ The value passed for SEP is exceeding its maximum length (16).
 X<1007>
 
 The value passed for QUOTE is exceeding its maximum length (16).
+
+=item *
+1010 "INI - the header is empty"
+X<1010>
+
+The header line parsed in the L</header> is empty.
+
+=item *
+1011 "INI - the header contains more than one valid separator"
+X<1011>
+
+The header line parsed in the  L</header>  contains more than one  (unique)
+separator character out of the allowed set of separators.
+
+=item *
+1012 "INI - the header contains an empty field"
+X<1012>
+
+The header line parsed in the L</header> is contains an empty field.
+
+=item *
+1013 "INI - the header contains nun-unique fields"
+X<1013>
+
+The header line parsed in the  L</header>  contains at least  two identical
+fields.
 
 =item *
 2010 "ECR - QUO char inside quotes followed by CR not part of EOL"
