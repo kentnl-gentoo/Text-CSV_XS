@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.22";
+$VERSION   = "1.23";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -1107,6 +1107,13 @@ sub _csv_attr
 	}
 
     my $fltr = delete $attr{filter};
+    my %fltr = (
+	not_blank => sub { @{$_[1]} > 1 or defined $_[1][0] && $_[1][0] ne "" },
+	not_empty => sub { grep { defined && $_ ne "" } @{$_[1]} },
+	filled    => sub { grep { defined && m/\S/    } @{$_[1]} },
+	);
+    defined $fltr && !ref $fltr && exists $fltr{$fltr} and
+	$fltr = { 0 => $fltr{$fltr} };
     ref $fltr eq "HASH" or $fltr = undef;
 
     defined $attr{auto_diag} or $attr{auto_diag} = 1;
@@ -1342,8 +1349,27 @@ The old(er) way of using global file handles is still supported
 
 Unicode is only tested to work with perl-5.8.2 and up.
 
+The simplest way to ensure the correct encoding is used for  in- and output
+is by either setting layers on the filehandles, or setting the L</encoding>
+argument for L</csv>.
+
+ open my $fh, "<:encoding(UTF-8)", "in.csv"  or die "in.csv: $!";
+ open my $fh, ">:encoding(UTF-8)", "out.csv" or die "out.csv: $!";
+ my $aoa = csv (in => "in.csv",     encoding => "UTF-8");
+ csv (in => $aoa, out => "out.csv", encoding => "UTF-8");
+
 On parsing (both for  L</getline> and  L</parse>),  if the source is marked
 being UTF8, then all fields that are marked binary will also be marked UTF8.
+
+On combining (L</print>  and  L</combine>):  if any of the combining fields
+was marked UTF8, the resulting string will be marked as UTF8.  Note however
+that all fields  I<before>  the first field marked UTF8 and contained 8-bit
+characters that were not upgraded to UTF8,  these will be  C<bytes>  in the
+resulting string too, possibly causing unexpected errors.  If you pass data
+of different encoding,  or you don't know if there is  different  encoding,
+force it to be upgraded before you pass them on:
+
+ $csv->print ($fh, [ map { utf8::upgrade (my $x = $_); $x } @data ]);
 
 For complete control over encoding, please use L<Text::CSV::Encoded>:
 
@@ -1360,16 +1386,6 @@ For complete control over encoding, please use L<Text::CSV::Encoded>:
  $csv = Text::CSV::Encoded->new ({ encoding  => undef }); # default
  # combine () and print () accept UTF8 marked data
  # parse () and getline () return UTF8 marked data
-
-On combining (L</print>  and  L</combine>):  if any of the combining fields
-was marked UTF8, the resulting string will be marked as UTF8.  Note however
-that all fields  I<before>  the first field marked UTF8 and contained 8-bit
-characters that were not upgraded to UTF8,  these will be  C<bytes>  in the
-resulting string too, possibly causing unexpected errors.  If you pass data
-of different encoding,  or you don't know if there is  different  encoding,
-force it to be upgraded before you pass them on:
-
- $csv->print ($fh, [ map { utf8::upgrade (my $x = $_); $x } @data ]);
 
 =head1 SPECIFICATION
 
@@ -2399,7 +2415,9 @@ The following values are available:
 
  $csv->header ($fh, { munge_column_names => sub { fc } });
  $csv->header ($fh, { munge_column_names => sub { "column_".$col++ } });
- $csv->header ($fh, { munge_column_names => sub { lc (shift =~ s/\W+/_/gr) } });
+ $csv->header ($fh, { munge_column_names => sub { lc (s/\W+/_/gr) } });
+
+As this callback is called in a C<map>, you can use C<$_> directly.
 
 =item set_column_names
 
@@ -2411,6 +2429,32 @@ a hash. Disable setting the header can be forced by using a false value for
 this option.
 
 =back
+
+=head3 Validation
+
+When receiving CSV files from external sources,  this method can be used to
+protect against changes in the layout by restricting to known headers  (and
+typos in the header fields).
+
+ my %known = (
+     "record key" => "c_rec",
+     "rec id"     => "c_rec",
+     "id_rec"     => "c_rec",
+     "kode"       => "code",
+     "code"       => "code",
+     "vaule"      => "value",
+     "value"      => "value",
+     );
+ my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
+ open my $fh, "<", $source or die "$source: $!";
+ $csv->header ($fh, { munge_column_names => sub {
+     s/\s+$//;
+     s/^\s+//;
+     $known{lc $_} or die "Unknown column '$_' in $source";
+     }});
+ while (my $row = $csv->getline_hr ($fh)) {
+     say join "\t", $row->{c_rec}, $row->{code}, $row->{value};
+     }
 
 =head2 bind_columns
 X<bind_columns>
@@ -3016,10 +3060,14 @@ return a true or false value.
             5 => sub { length > 4 }, # length of the 5th field minimal 5
             });
 
-If the keys to the filter contain any character that in not a digit it will
-also implicitly set  L</headers> to C<auto>  unless L</headers> was already
-passed as argument.  When headers are active, returning an array of hashes,
-the filter is not applicable to the header itself.
+ csv (in => "file.csv", filter => "not_blank");
+ csv (in => "file.csv", filter => "not_empty");
+ csv (in => "file.csv", filter => "filled");
+
+If the keys to the filter hash contain any character that is not a digit it
+will also implicitly set L</headers> to C<"auto">  unless  L</headers>  was
+already passed as argument.  When headers are active, returning an array of
+hashes, the filter is not applicable to the header itself.
 
  csv (in => "file.csv", filter => { foo => sub { $_ > 4 }});
 
@@ -3045,6 +3093,63 @@ will upper-case the second field, and then skip it if the resulting content
 evaluates to false. To always accept, end with truth:
 
  filter => { 2 => sub { $_ = uc; 1 }}
+
+B<Predefined filters>
+
+Given a file like (line numbers prefixed for doc purpose only):
+
+ 1:1,2,3
+ 2:
+ 3:,
+ 4:""
+ 5:,,
+ 6:, ,
+ 7:"",
+ 8:" "
+ 9:4,5,6
+
+=over 2
+
+=item not_blank
+
+Filter out the blank lines
+
+This filter is a shortcut for
+
+ filter => { 0 => sub { @{$_[1]} > 1 or
+             defined $_[1][0] && $_[1][0] ne "" } }
+
+Due to the implementation,  it is currently impossible to also filter lines
+that consists only of a quoted empty field. These lines are also considered
+blank lines.
+
+With the given example, lines 2 and 4 will be skipped.
+
+=item not_empty
+
+Filter out lines where all the fields are empty.
+
+This filter is a shortcut for
+
+ filter => { 0 => sub { grep { defined && $_ ne "" } @{$_[1]} } }
+
+A space is not regarded being empty, so given the example data, lines 1, 3,
+4, 5, and 7 are skipped.
+
+=item filled
+
+Filter out lines that have no visible data
+
+This filter is a shortcut for
+
+ filter => { 0 => sub { grep { defined && m/\S/ } @{$_[1]} } }
+
+This filter rejects all lines that I<not> have at least one field that does
+not evaluate to the empty string.
+
+With the given example data, this filter would skip lines 2 through 8.
+
+=back
 
 =item after_in
 X<after_in>

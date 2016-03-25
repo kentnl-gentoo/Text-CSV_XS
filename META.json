@@ -1,23 +1,6 @@
 {
-   "version" : "1.22",
-   "generated_by" : "Author",
    "dynamic_config" : 1,
    "prereqs" : {
-      "build" : {
-         "requires" : {
-            "Config" : "0"
-         }
-      },
-      "runtime" : {
-         "requires" : {
-            "DynaLoader" : "0",
-            "IO::Handle" : "0",
-            "perl" : "5.006001"
-         },
-         "recommends" : {
-            "Encode" : "2.82"
-         }
-      },
       "configure" : {
          "requires" : {
             "ExtUtils::MakeMaker" : "0"
@@ -25,40 +8,57 @@
       },
       "test" : {
          "requires" : {
-            "Tie::Scalar" : "0",
-            "Test::More" : "0"
+            "Test::More" : "0",
+            "Tie::Scalar" : "0"
+         }
+      },
+      "build" : {
+         "requires" : {
+            "Config" : "0"
+         }
+      },
+      "runtime" : {
+         "recommends" : {
+            "Encode" : "2.83"
+         },
+         "requires" : {
+            "perl" : "5.006001",
+            "IO::Handle" : "0",
+            "DynaLoader" : "0"
          }
       }
    },
-   "author" : [
-      "H.Merijn Brand <h.m.brand@xs4all.nl>"
-   ],
+   "generated_by" : "Author",
+   "version" : "1.23",
    "meta-spec" : {
-      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
-      "version" : "2"
+      "version" : "2",
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec"
    },
-   "release_status" : "stable",
-   "license" : [
-      "perl_5"
-   ],
-   "abstract" : "Comma-Separated Values manipulation routines",
    "provides" : {
       "Text::CSV_XS" : {
          "file" : "CSV_XS.pm",
-         "version" : "1.22"
+         "version" : "1.23"
       }
    },
+   "name" : "Text-CSV_XS",
+   "abstract" : "Comma-Separated Values manipulation routines",
+   "author" : [
+      "H.Merijn Brand <h.m.brand@xs4all.nl>"
+   ],
+   "release_status" : "stable",
    "resources" : {
+      "repository" : {
+         "url" : "https://github.com/Tux/Text-CSV_XS",
+         "web" : "https://github.com/Tux/Text-CSV_XS",
+         "type" : "git"
+      },
       "license" : [
          "http://dev.perl.org/licenses/"
       ],
-      "repository" : {
-         "type" : "git",
-         "web" : "https://github.com/Tux/Text-CSV_XS",
-         "url" : "https://github.com/Tux/Text-CSV_XS"
-      },
       "homepage" : "https://metacpan.org/pod/Text::CSV_XS",
       "x_IRC" : "irc://irc.perl.org/#csv"
    },
-   "name" : "Text-CSV_XS"
+   "license" : [
+      "perl_5"
+   ]
 }
