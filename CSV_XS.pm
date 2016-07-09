@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.23";
+$VERSION   = "1.24";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -1354,8 +1354,11 @@ is by either setting layers on the filehandles, or setting the L</encoding>
 argument for L</csv>.
 
  open my $fh, "<:encoding(UTF-8)", "in.csv"  or die "in.csv: $!";
- open my $fh, ">:encoding(UTF-8)", "out.csv" or die "out.csv: $!";
+or
  my $aoa = csv (in => "in.csv",     encoding => "UTF-8");
+
+ open my $fh, ">:encoding(UTF-8)", "out.csv" or die "out.csv: $!";
+or
  csv (in => $aoa, out => "out.csv", encoding => "UTF-8");
 
 On parsing (both for  L</getline> and  L</parse>),  if the source is marked
@@ -2827,7 +2830,7 @@ If  C<headers>  is an anonymous list,  the entries in the list will be used
 instead
 
  my $aoh = csv (in => $fh, headers => [qw( Foo Bar )]);
- csv (in => $aoa, out => $fh, headers => [qw( code description price }]);
+ csv (in => $aoa, out => $fh, headers => [qw( code description price )]);
 
 If C<headers> is an hash reference, this implies C<auto>, but header fields
 for that exist as key in the hashref will be replaced by the value for that
