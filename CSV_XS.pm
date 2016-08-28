@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.24";
+$VERSION   = "1.25";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -45,8 +45,7 @@ if ($] < 5.008002) {
 #   class/object method expecting no arguments and returning the version
 #   number of Text::CSV.  there are no side-effects.
 
-sub version
-{
+sub version {
     return $VERSION;
     } # version
 
@@ -99,8 +98,7 @@ my %attr_alias = (
 my $last_new_err = Text::CSV_XS->SetDiag (0);
 
 # NOT a method: is also used before bless
-sub _unhealthy_whitespace
-{
+sub _unhealthy_whitespace {
     my $self = shift;
     $_[0] or return 0; # no checks needed without allow_whitespace
 
@@ -114,8 +112,7 @@ sub _unhealthy_whitespace
     return 0;
     } # _sane_whitespace
 
-sub _check_sanity
-{
+sub _check_sanity {
     my $self = shift;
 
     my $eol = $self->{eol};
@@ -149,13 +146,11 @@ sub _check_sanity
     return _unhealthy_whitespace ($self, $self->{allow_whitespace});
     } # _check_sanity
 
-sub known_attributes
-{
+sub known_attributes {
     sort grep !m/^_/ => "sep", "quote", keys %def_attr;
     } # known_attributes
 
-sub new
-{
+sub new {
     $last_new_err = Text::CSV_XS->SetDiag (1000,
 	"usage: my \$csv = Text::CSV_XS->new ([{ option => value, ... }]);");
 
@@ -259,8 +254,7 @@ my %_cache_id = ( # Only expose what is accessed from within PM
     );
 
 # A `character'
-sub _set_attr_C
-{
+sub _set_attr_C {
     my ($self, $name, $val, $ec) = @_;
     defined $val or $val = 0;
     utf8::decode ($val);
@@ -271,8 +265,7 @@ sub _set_attr_C
     } # _set_attr_C
 
 # A flag
-sub _set_attr_X
-{
+sub _set_attr_X {
     my ($self, $name, $val) = @_;
     defined $val or $val = 0;
     $self->{$name} = $val;
@@ -280,8 +273,7 @@ sub _set_attr_X
     } # _set_attr_X
 
 # A number
-sub _set_attr_N
-{
+sub _set_attr_N {
     my ($self, $name, $val) = @_;
     $self->{$name} = $val;
     $self->_cache_set ($_cache_id{$name}, 0 + $val);
@@ -289,8 +281,7 @@ sub _set_attr_N
 
 # Accessor methods.
 #   It is unwise to change them halfway through a single file!
-sub quote_char
-{
+sub quote_char {
     my $self = shift;
     if (@_) {
 	$self->_set_attr_C ("quote_char", shift);
@@ -299,8 +290,7 @@ sub quote_char
     $self->{quote_char};
     } # quote_char
 
-sub quote
-{
+sub quote {
     my $self = shift;
     if (@_) {
 	my $quote = shift;
@@ -326,15 +316,13 @@ sub quote
     defined $quote && length ($quote) ? $quote : $self->{quote_char};
     } # quote
 
-sub escape_char
-{
+sub escape_char {
     my $self = shift;
     @_ and $self->_set_attr_C ("escape_char", shift);
     $self->{escape_char};
     } # escape_char
 
-sub sep_char
-{
+sub sep_char {
     my $self = shift;
     if (@_) {
 	$self->_set_attr_C ("sep_char", shift);
@@ -343,8 +331,7 @@ sub sep_char
     $self->{sep_char};
     } # sep_char
 
-sub sep
-{
+sub sep {
     my $self = shift;
     if (@_) {
 	my $sep = shift;
@@ -370,8 +357,7 @@ sub sep
     defined $sep && length ($sep) ? $sep : $self->{sep_char};
     } # sep
 
-sub eol
-{
+sub eol {
     my $self = shift;
     if (@_) {
 	my $eol = shift;
@@ -383,58 +369,50 @@ sub eol
     $self->{eol};
     } # eol
 
-sub always_quote
-{
+sub always_quote {
     my $self = shift;
     @_ and $self->_set_attr_X ("always_quote", shift);
     $self->{always_quote};
     } # always_quote
 
-sub quote_space
-{
+sub quote_space {
     my $self = shift;
     @_ and $self->_set_attr_X ("quote_space", shift);
     $self->{quote_space};
     } # quote_space
 
-sub quote_empty
-{
+sub quote_empty {
     my $self = shift;
     @_ and $self->_set_attr_X ("quote_empty", shift);
     $self->{quote_empty};
     } # quote_empty
 
-sub escape_null
-{
+sub escape_null {
     my $self = shift;
     @_ and $self->_set_attr_X ("escape_null", shift);
     $self->{escape_null};
     } # escape_null
 sub quote_null { goto &escape_null; }
 
-sub quote_binary
-{
+sub quote_binary {
     my $self = shift;
     @_ and $self->_set_attr_X ("quote_binary", shift);
     $self->{quote_binary};
     } # quote_binary
 
-sub binary
-{
+sub binary {
     my $self = shift;
     @_ and $self->_set_attr_X ("binary", shift);
     $self->{binary};
     } # binary
 
-sub decode_utf8
-{
+sub decode_utf8 {
     my $self = shift;
     @_ and $self->_set_attr_X ("decode_utf8", shift);
     $self->{decode_utf8};
     } # decode_utf8
 
-sub keep_meta_info
-{
+sub keep_meta_info {
     my $self = shift;
     if (@_) {
 	my $v = shift;
@@ -445,22 +423,19 @@ sub keep_meta_info
     $self->{keep_meta_info};
     } # keep_meta_info
 
-sub allow_loose_quotes
-{
+sub allow_loose_quotes {
     my $self = shift;
     @_ and $self->_set_attr_X ("allow_loose_quotes", shift);
     $self->{allow_loose_quotes};
     } # allow_loose_quotes
 
-sub allow_loose_escapes
-{
+sub allow_loose_escapes {
     my $self = shift;
     @_ and $self->_set_attr_X ("allow_loose_escapes", shift);
     $self->{allow_loose_escapes};
     } # allow_loose_escapes
 
-sub allow_whitespace
-{
+sub allow_whitespace {
     my $self = shift;
     if (@_) {
 	my $aw = shift;
@@ -471,36 +446,31 @@ sub allow_whitespace
     $self->{allow_whitespace};
     } # allow_whitespace
 
-sub allow_unquoted_escape
-{
+sub allow_unquoted_escape {
     my $self = shift;
     @_ and $self->_set_attr_X ("allow_unquoted_escape", shift);
     $self->{allow_unquoted_escape};
     } # allow_unquoted_escape
 
-sub blank_is_undef
-{
+sub blank_is_undef {
     my $self = shift;
     @_ and $self->_set_attr_X ("blank_is_undef", shift);
     $self->{blank_is_undef};
     } # blank_is_undef
 
-sub empty_is_undef
-{
+sub empty_is_undef {
     my $self = shift;
     @_ and $self->_set_attr_X ("empty_is_undef", shift);
     $self->{empty_is_undef};
     } # empty_is_undef
 
-sub verbatim
-{
+sub verbatim {
     my $self = shift;
     @_ and $self->_set_attr_X ("verbatim", shift);
     $self->{verbatim};
     } # verbatim
 
-sub auto_diag
-{
+sub auto_diag {
     my $self = shift;
     if (@_) {
 	my $v = shift;
@@ -511,8 +481,7 @@ sub auto_diag
     $self->{auto_diag};
     } # auto_diag
 
-sub diag_verbose
-{
+sub diag_verbose {
     my $self = shift;
     if (@_) {
 	my $v = shift;
@@ -528,20 +497,17 @@ sub diag_verbose
 #   object method returning the success or failure of the most recent
 #   combine () or parse ().  there are no side-effects.
 
-sub status
-{
+sub status {
     my $self = shift;
     return $self->{_STATUS};
     } # status
 
-sub eof
-{
+sub eof {
     my $self = shift;
     return $self->{_EOF};
     } # status
 
-sub types
-{
+sub types {
     my $self = shift;
     if (@_) {
 	if (my $types = shift) {
@@ -559,8 +525,7 @@ sub types
 	}
     } # types
 
-sub callbacks
-{
+sub callbacks {
     my $self = shift;
     if (@_) {
 	my $cb;
@@ -593,8 +558,7 @@ sub callbacks
 #   If (and only if) an error occurred, this function returns a code that
 #   indicates the reason of failure
 
-sub error_diag
-{
+sub error_diag {
     my $self = shift;
     my @diag = (0 + $last_new_err, $last_new_err, 0, 0, 0);
 
@@ -649,8 +613,7 @@ sub error_diag
     return $context ? @diag : $diag[1];
     } # error_diag
 
-sub record_number
-{
+sub record_number {
     my $self = shift;
     return $self->{_RECNO};
     } # record_number
@@ -661,8 +624,7 @@ sub record_number
 #   input to the most recent parse (), whichever is more recent.  there are
 #   no side-effects.
 
-sub string
-{
+sub string {
     my $self = shift;
     return ref $self->{_STRING} ? ${$self->{_STRING}} : undef;
     } # string
@@ -673,8 +635,7 @@ sub string
 #   input to the most recent combine (), whichever is more recent.  there
 #   are no side-effects.
 
-sub fields
-{
+sub fields {
     my $self = shift;
     return ref $self->{_FIELDS} ? @{$self->{_FIELDS}} : undef;
     } # fields
@@ -686,30 +647,26 @@ sub fields
 #   are no side-effects. meta_info () returns (if available)  some of the
 #   field's properties
 
-sub meta_info
-{
+sub meta_info {
     my $self = shift;
     return ref $self->{_FFLAGS} ? @{$self->{_FFLAGS}} : undef;
     } # meta_info
 
-sub is_quoted
-{
+sub is_quoted {
     my ($self, $idx, $val) = @_;
     ref $self->{_FFLAGS} &&
 	$idx >= 0 && $idx < @{$self->{_FFLAGS}} or return;
     $self->{_FFLAGS}[$idx] & 0x0001 ? 1 : 0;
     } # is_quoted
 
-sub is_binary
-{
+sub is_binary {
     my ($self, $idx, $val) = @_;
     ref $self->{_FFLAGS} &&
 	$idx >= 0 && $idx < @{$self->{_FFLAGS}} or return;
     $self->{_FFLAGS}[$idx] & 0x0002 ? 1 : 0;
     } # is_binary
 
-sub is_missing
-{
+sub is_missing {
     my ($self, $idx, $val) = @_;
     $idx < 0 || !ref $self->{_FFLAGS} and return;
     $idx >= @{$self->{_FFLAGS}} and return 1;
@@ -727,8 +684,7 @@ sub is_missing
 #      setting string ()
 #      setting error_input ()
 
-sub combine
-{
+sub combine {
     my $self = shift;
     my $str  = "";
     $self->{_FIELDS} = \@_;
@@ -749,8 +705,7 @@ sub combine
 #      setting string ()
 #      setting error_input ()
 
-sub parse
-{
+sub parse {
     my ($self, $str) = @_;
 
     my $fields = [];
@@ -769,8 +724,7 @@ sub parse
     $self->{_STATUS};
     } # parse
 
-sub column_names
-{
+sub column_names {
     my ($self, @keys) = @_;
     @keys or
 	return defined $self->{_COLUMN_NAMES} ? @{$self->{_COLUMN_NAMES}} : ();
@@ -792,8 +746,7 @@ sub column_names
     @{$self->{_COLUMN_NAMES}};
     } # column_names
 
-sub header
-{
+sub header {
     my ($self, $fh, @args) = @_;
     my (@seps, %args);
     for (@args) {
@@ -870,8 +823,7 @@ sub header
     wantarray ? @hdr : $self;
     } # header
 
-sub bind_columns
-{
+sub bind_columns {
     my ($self, @refs) = @_;
     @refs or
 	return defined $self->{_BOUND_COLUMNS} ? @{$self->{_BOUND_COLUMNS}} : undef;
@@ -892,8 +844,7 @@ sub bind_columns
     @refs;
     } # bind_columns
 
-sub getline_hr
-{
+sub getline_hr {
     my ($self, @args, %hr) = @_;
     $self->{_COLUMN_NAMES} or croak ($self->SetDiag (3002));
     my $fr = $self->getline (@args) or return;
@@ -904,16 +855,14 @@ sub getline_hr
     \%hr;
     } # getline_hr
 
-sub getline_hr_all
-{
+sub getline_hr_all {
     my ($self, @args, %hr) = @_;
     $self->{_COLUMN_NAMES} or croak ($self->SetDiag (3002));
     my @cn = @{$self->{_COLUMN_NAMES}};
     [ map { my %h; @h{@cn} = @$_; \%h } @{$self->getline_all (@args)} ];
     } # getline_hr_all
 
-sub say
-{
+sub say {
     my ($self, $io, @f) = @_;
     my $eol = $self->eol;
     defined $eol && $eol ne "" or $self->eol ($\ || $/);
@@ -922,16 +871,14 @@ sub say
     return $state;
     } # say
 
-sub print_hr
-{
+sub print_hr {
     my ($self, $io, $hr) = @_;
     $self->{_COLUMN_NAMES} or croak ($self->SetDiag (3009));
     ref $hr eq "HASH"      or croak ($self->SetDiag (3010));
     $self->print ($io, [ map { $hr->{$_} } $self->column_names ]);
     } # print_hr
 
-sub fragment
-{
+sub fragment {
     my ($self, $io, $spec) = @_;
 
     my $qd = qr{\s* [0-9]+ \s* }x;		# digit
@@ -1033,13 +980,13 @@ sub fragment
 
 my $csv_usage = q{usage: my $aoa = csv (in => $file);};
 
-sub _csv_attr
-{
+sub _csv_attr {
     my %attr = (@_ == 1 && ref $_[0] eq "HASH" ? %{$_[0]} : @_) or croak;
 
     $attr{binary} = 1;
 
     my $enc = delete $attr{enc} || delete $attr{encoding} || "";
+    $enc eq "auto" and ($attr{detect_bom}, $enc) = (1, "");
     $enc =~ m/^[-\w.]+$/ and $enc = ":encoding($enc)";
 
     my $fh;
@@ -1098,6 +1045,14 @@ sub _csv_attr
     my $cboi = delete $attr{callbacks}{on_in}       ||
 	       delete $attr{on_in};
 
+    my $hd_s = delete $attr{sep_set}                ||
+	       delete $attr{seps};
+    my $hd_b = delete $attr{detect_bom}             ||
+	       delete $attr{bom};
+    my $hd_m = delete $attr{munge}                  ||
+	       delete $attr{munge_column_names};
+    my $hd_c = delete $attr{set_column_names};
+
     for ([ quo    => "quote"		],
 	 [ esc    => "escape"		],
 	 [ escape => "escape_char"	],
@@ -1127,6 +1082,7 @@ sub _csv_attr
 	cls  => $cls,
 	in   => $in,
 	out  => $out,
+	enc  => $enc,
 	hdrs => $hdrs,
 	key  => $key,
 	frag => $frag,
@@ -1134,11 +1090,14 @@ sub _csv_attr
 	cbai => $cbai,
 	cbbo => $cbbo,
 	cboi => $cboi,
+	hd_s => $hd_s,
+	hd_b => $hd_b,
+	hd_m => $hd_m,
+	hd_c => $hd_c,
 	};
     } # _csv_attr
 
-sub csv
-{
+sub csv {
     @_ && ref $_[0] eq __PACKAGE__ and splice @_, 0, 0, "csv";
     @_ or croak $csv_usage;
 
@@ -1195,15 +1154,41 @@ sub csv
 	return 1;
 	}
 
+    if (defined $c->{hd_s} || defined $c->{hd_b} || defined $c->{hd_m} || defined $c->{hd_c}) {
+	my %harg;
+	defined $c->{hd_s} and $harg{set_set}            = $c->{hd_s};
+	defined $c->{hd_d} and $harg{detect_bom}         = $c->{hd_b};
+	defined $c->{hd_m} and $harg{munge_column_names} = $hdrs ? "none" : $c->{hd_m};
+	defined $c->{hd_c} and $harg{set_column_names}   = $hdrs ? 0      : $c->{hd_c};
+	$csv->header ($fh, \%harg);
+	my @hdr = $csv->column_names;
+	@hdr and $hdrs ||= \@hdr;
+	}
+
     my $key = $c->{key} and $hdrs ||= "auto";
     $c->{fltr} && grep m/\D/ => keys %{$c->{fltr}} and $hdrs ||= "auto";
-    if (defined $hdrs && !ref $hdrs) {
-	if ($hdrs eq "skip") {
-	    $csv->getline ($fh); # discard;
+    if (defined $hdrs) {
+	if (!ref $hdrs) {
+	    if ($hdrs eq "skip") {
+		$csv->getline ($fh); # discard;
+		}
+	    elsif ($hdrs eq "auto") {
+		my $h = $csv->getline ($fh) or return;
+		$hdrs = [ map {      $hdr{$_} || $_ } @$h ];
+		}
+	    elsif ($hdrs eq "lc") {
+		my $h = $csv->getline ($fh) or return;
+		$hdrs = [ map { lc ($hdr{$_} || $_) } @$h ];
+		}
+	    elsif ($hdrs eq "uc") {
+		my $h = $csv->getline ($fh) or return;
+		$hdrs = [ map { uc ($hdr{$_} || $_) } @$h ];
+		}
 	    }
-	elsif ($hdrs eq "auto") {
-	    my $h = $csv->getline ($fh) or return;
-	    $hdrs = [ map { $hdr{$_} || $_ } @$h ];
+	elsif (ref $hdrs eq "CODE") {
+	    my $h  = $csv->getline ($fh) or return;
+	    my $cr = $hdrs;
+	    $hdrs  = [ map {  $cr->($hdr{$_} || $_) } @$h ];
 	    }
 	}
 
@@ -2481,6 +2466,11 @@ argument C<undef>. This will also clear column names.
 If no arguments are passed at all, L</bind_columns> will return the list of
 current bindings or C<undef> if no binds are active.
 
+Note that in parsing with  C<bind_columns>,  the fields are set on the fly.
+That implies that if the third field  of a row  causes an error,  the first
+two fields already have been assigned the values of the current row,  while
+the rest will still hold the values of the previous row.
+
 =head2 eof
 X<eof>
 
@@ -2490,6 +2480,21 @@ If L</parse> or  L</getline>  was used with an IO stream,  this method will
 return true (1) if the last call hit end of file,  otherwise it will return
 false ('').  This is useful to see the difference between a failure and end
 of file.
+
+Note that if the parsing of the last line caused an error,  C<eof> is still
+true.  That means that if you are I<not> using L</auto_diag>, an idiom like
+
+ while (my $row = $csv->getline ($fh)) {
+     # ...
+     }
+ $csv->eof or $csv->error_diag;
+
+will I<not> report the error. You would have to change that to
+
+ while (my $row = $csv->getline ($fh)) {
+     # ...
+     }
+ +$csv->error_diag and $csv->error_diag;
 
 =head2 types
 X<types>
@@ -2741,7 +2746,7 @@ In the latter case, the object attributes are used from the existing object
 and the attribute arguments in the function call are ignored:
 
  my $csv = Text::CSV_XS->new ({ sep_char => ";" });
- my $aoa = $csv->csv (in => "file.csv", sep_char => ",");
+ my $aoh = $csv->csv (in => "file.csv", bom => 1);
 
 will parse using C<;> as C<sep_char>, not C<,>.
 
@@ -2809,28 +2814,92 @@ to C<open>. There is no default value. This attribute does not work in perl
 5.6.x.  C<encoding> can be abbreviated to C<enc> for ease of use in command
 line invocations.
 
+If C<encoding> is set to the literal value C<"auto">, the method L</header>
+will be invoked on the opened stream to check if there is a BOM and set the
+encoding accordingly.   This is equal to passing a true value in the option
+L<C<detect_bom>|/detect_bom>.
+
+=head3 detect_bom
+X<detect_bom>
+
+If  C<detect_bom>  is given, the method  L</header>  will be invoked on the
+opened stream to check if there is a BOM and set the encoding accordingly.
+
+C<detect_bom> can be abbreviated to C<bom>.
+
+This is the same as setting L<C<encoding>|/encoding> to C<"auto">.
+
+Note that as L</header> is invoked, its default is to also set the headers.
+
 =head3 headers
 X<headers>
 
 If this attribute is not given, the default behavior is to produce an array
 of arrays.
 
-If C<headers> is supplied,  it should be either an anonymous list of column
-names, an anonymous hashref or a flag:  C<auto> or C<skip>. When C<skip> is
-used, the header will not be included in the output.
+If C<headers> is supplied,  it should be an anonymous list of column names,
+an anonymous hashref, a coderef, or a literal flag:  C<auto>, C<lc>, C<uc>,
+or C<skip>.
+
+=over 2
+
+=item skip
+X<skip>
+
+When C<skip> is used, the header will not be included in the output.
 
  my $aoa = csv (in => $fh, headers => "skip");
+
+=item auto
+X<auto>
 
 If C<auto> is used, the first line of the C<CSV> source will be read as the
 list of field headers and used to produce an array of hashes.
 
  my $aoh = csv (in => $fh, headers => "auto");
 
+=item lc
+X<lc>
+
+If C<lc> is used,  the first line of the  C<CSV> source will be read as the
+list of field headers mapped to  lower case and used to produce an array of
+hashes. This is a variation of C<auto>.
+
+ my $aoh = csv (in => $fh, headers => "lc");
+
+=item uc
+X<uc>
+
+If C<uc> is used,  the first line of the  C<CSV> source will be read as the
+list of field headers mapped to  upper case and used to produce an array of
+hashes. This is a variation of C<auto>.
+
+ my $aoh = csv (in => $fh, headers => "uc");
+
+=item CODE
+X<CODE>
+
+If a coderef is used,  the first line of the  C<CSV> source will be read as
+the list of mangled field headers in which each field is passed as the only
+argument to the coderef. This list is used to produce an array of hashes.
+
+ my $aoh = csv (in      => $fh,
+                headers => sub { lc ($_[0]) =~ s/kode/code/gr });
+
+this example is a variation of using C<lc> where all occurrences of C<kode>
+are replaced with C<code>.
+
+=item ARRAY
+X<ARRAY>
+
 If  C<headers>  is an anonymous list,  the entries in the list will be used
-instead
+as field names. The first line is considered data instead of headers.
 
  my $aoh = csv (in => $fh, headers => [qw( Foo Bar )]);
  csv (in => $aoa, out => $fh, headers => [qw( code description price )]);
+
+=item HASH
+X<HASH>
 
 If C<headers> is an hash reference, this implies C<auto>, but header fields
 for that exist as key in the hashref will be replaced by the value for that
@@ -2845,12 +2914,25 @@ using
 
 will return an entry like
 
- { pc       => "1234AA",
-   city     => "Duckstad",
-   name     => "Donald",
-   ID       => "13",
+ { pc     => "1234AA",
+   city   => "Duckstad",
+   name   => "Donald",
+   ID     => "13",
    fubble => "X313DF",
    }
+
+=back
+
+See also L<C<munge_column_names>|/munge_column_names> and
+L<C<set_column_names>|/set_column_names>.
+
+=head3 munge_column_names
+X<munge_column_names>
+
+If C<munge_column_names> is set,  the method  L</header>  is invoked on the
+opened stream with all matching arguments to detect and set the headers.
+
+C<munge_column_names> can be abbreviated to C<munge>.
 
 =head3 key
 X<key>
@@ -2907,7 +2989,25 @@ Combining all of them could give something like
      );
  say $aoh->[15]{Foo};
 
+=head3 sep_set
+X<sep_set>
+X<seps>
+
+If C<sep_set> is set, the method L</header> is invoked on the opened stream
+to detect and set L<C<sep_char>|/sep_char> with the given set.
+
+C<sep_set> can be abbreviated to C<seps>.
+
+Note that as L</header> is invoked, its default is to also set the headers.
+
+=head3 set_column_names
+X<set_column_names>
+
+If  C<set_column_names> is passed,  the method L</header> is invoked on the
+opened stream with all arguments meant for L</header>.
+
 =head2 Callbacks
+X<Callbacks>
 
 Callbacks enable actions triggered from the I<inside> of Text::CSV_XS.
 
@@ -3136,7 +3236,7 @@ This filter is a shortcut for
 
  filter => { 0 => sub { grep { defined && $_ ne "" } @{$_[1]} } }
 
-A space is not regarded being empty, so given the example data, lines 1, 3,
+A space is not regarded being empty, so given the example data, lines 2, 3,
 4, 5, and 7 are skipped.
 
 =item filled
