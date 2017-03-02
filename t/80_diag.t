@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
- use Test::More tests => 264;
+ use Test::More tests => 279;
 #use Test::More "no_plan";
 
 my %err;
@@ -11,7 +11,7 @@ my %err;
 BEGIN {
     require_ok "Text::CSV_XS";
     plan skip_all => "Cannot load Text::CSV_XS" if $@;
-    require "t/util.pl";
+    require "./t/util.pl";
 
     open XS, "<", "CSV_XS.xs" or die "Cannot read error messages from XS\n";
     while (<XS>) {
@@ -230,6 +230,38 @@ unlink $diag_file;
     ok ($csv->column_names ("foo"), "set columns");
     eval { $csv->print_hr (*STDERR, []); };
     is (0 + $csv->error_diag, 3010, "print_hr needs a hashref");
+    }
+
+{   my $csv = Text::CSV_XS->new ({ sep_char => "=" });
+    eval { $csv->quote ("::::::::::::::"); };
+    is (0 + $csv->error_diag,    0, "Can set quote to something long");
+    eval { $csv->quote ("="); };
+    is (0 + $csv->error_diag, 1001, "Cannot set quote to current sep");
+    }
+
+{   my $csv = Text::CSV_XS->new ({ quote_char => "=" });
+    eval { $csv->sep ("::::::::::::::"); };
+    is (0 + $csv->error_diag,    0, "Can set sep to something long");
+    eval { $csv->sep (undef); };
+    is (0 + $csv->error_diag, 1008, "Can set sep to undef");
+    eval { $csv->sep ("="); };
+    is (0 + $csv->error_diag, 1001, "Cannot set sep to current sep");
+    }
+
+{   my $csv = Text::CSV_XS->new;
+    eval { $csv->header (undef, "foo"); };
+    is (0 + $csv->error_diag, 1014, "Cannot read header from undefined source");
+    eval { $csv->header (*STDIN, "foo"); };
+    like ($@, qr/^usage:/, "Illegal header call");
+    }
+
+{   my $csv = Text::CSV_XS->new;
+    foreach my $arg ([], sub {}, Text::CSV_XS->new, {}) {
+	eval { $csv->parse ($arg) };
+	my @diag = $csv->error_diag;
+	is   ($diag[0], 1500, "Invalid parameters (code)");
+	like ($diag[1], qr{^PRM - Invalid/unsupported argument}, "Invalid parameters (msg)");
+	}
     }
 
 1;

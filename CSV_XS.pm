@@ -1,6 +1,6 @@
 package Text::CSV_XS;
 
-# Copyright (c) 2007-2016 H.Merijn Brand.  All rights reserved.
+# Copyright (c) 2007-2017 H.Merijn Brand.  All rights reserved.
 # Copyright (c) 1998-2001 Jochen Wiedmann. All rights reserved.
 # Copyright (c) 1997 Alan Citterman.       All rights reserved.
 #
@@ -26,7 +26,7 @@ use DynaLoader ();
 use Carp;
 
 use vars   qw( $VERSION @ISA @EXPORT_OK );
-$VERSION   = "1.26";
+$VERSION   = "1.27";
 @ISA       = qw( DynaLoader Exporter );
 @EXPORT_OK = qw( csv );
 bootstrap Text::CSV_XS $VERSION;
@@ -126,9 +126,13 @@ sub _check_sanity {
 #	        "', QUO: '", DPeek ($quo),
 #	        "', ESC: '", DPeek ($esc),"'");
 
-    if (defined $sep) {	# sep_char should not be undefined
+    # sep_char should not be undefined
+    if (defined $sep && $sep ne "") {
 	length ($sep) > 16		and return 1006;
 	$sep =~ m/[\r\n]/		and return 1003;
+	}
+    else {
+					    return 1008;
 	}
     if (defined $quo) {
 	defined $sep && $quo eq $sep	and return 1001;
@@ -708,6 +712,8 @@ sub combine {
 sub parse {
     my ($self, $str) = @_;
 
+    ref $str and croak ($self->SetDiag (1500));
+
     my $fields = [];
     my $fflags = [];
     $self->{_STRING} = \$str;
@@ -748,6 +754,9 @@ sub column_names {
 
 sub header {
     my ($self, $fh, @args) = @_;
+
+    $fh or croak ($self->SetDiag (1014));
+
     my (@seps, %args);
     for (@args) {
 	if (ref $_ eq "ARRAY") {
@@ -758,7 +767,7 @@ sub header {
 	    %args = %$_;
 	    next;
 	    }
-	croak (q{usage: $csv->headers ($fh, [ seps ], { options })});
+	croak (q{usage: $csv->header ($fh, [ seps ], { options })});
 	}
 
     defined $args{detect_bom}         or $args{detect_bom}         = 1;
@@ -1001,7 +1010,6 @@ sub _csv_attr {
 
     if ($out) {
 	$in or croak $csv_usage;	# No out without in
-	defined $attr{eol} or $attr{eol} = "\r\n";
 	if ((ref $out and ref $out ne "SCALAR") or "GLOB" eq ref \$out) {
 	    $fh = $out;
 	    }
@@ -1010,6 +1018,10 @@ sub _csv_attr {
 	    $cls = 1;
 	    }
 	$enc and binmode $fh, $enc;
+	unless (defined $attr{eol}) {
+	    my @layers = eval { PerlIO::get_layers ($fh) };
+	    $attr{eol} = (grep m/crlf/ => @layers) ? "\n" : "\r\n";
+	    }
 	}
 
     if (   ref $in eq "CODE" or ref $in eq "ARRAY") {
@@ -1074,7 +1086,8 @@ sub _csv_attr {
 	$fltr = { 0 => $fltr{$fltr} };
     ref $fltr eq "HASH" or $fltr = undef;
 
-    defined $attr{auto_diag} or $attr{auto_diag} = 1;
+    defined $attr{auto_diag}   or $attr{auto_diag}   = 1;
+    defined $attr{escape_null} or $attr{escape_null} = 0;
     my $csv = delete $attr{csv} || Text::CSV_XS->new (\%attr)
 	or croak $last_new_err;
 
@@ -1869,6 +1882,8 @@ you to treat the  C<NULL>  byte as a simple binary character in binary mode
 (the C<< { binary => 1 } >> is set).  The default is true.  You can prevent
 C<NULL> escapes by setting this attribute to C<0>.
 
+The default when using the C<csv> function is C<false>.
+
 =head3 keep_meta_info
 X<keep_meta_info>
 
@@ -2188,6 +2203,9 @@ argument.
 
 You may use the L</types>  method for setting column types.  See L</types>'
 description below.
+
+The C<$line> argument is supposed to be a simple scalar. Everything else is
+supposed to croak and set error 1500.
 
 =head2 fragment
 X<fragment>
@@ -2713,9 +2731,6 @@ This function is not exported by default and should be explicitly requested:
 
  use Text::CSV_XS qw( csv );
 
-This is the second draft. This function will stay,  but the arguments might
-change based on user feedback.
-
 This is an high-level function that aims at simple (user) interfaces.  This
 can be used to read/parse a C<CSV> file or stream (the default behavior) or
 to produce a file or write to a stream (define the  C<out>  attribute).  It
@@ -2738,11 +2753,12 @@ as enumerated and explained in L</new>.
 
 If not overridden, the default option used for CSV is
 
- auto_diag => 1
+ auto_diag   => 1
+ escape_null => 0
 
 The option that is always set and cannot be altered is
 
- binary    => 1
+ binary      => 1
 
 As this function will likely be used in one-liners,  it allows  C<quote> to
 be abbreviated as C<quo>,  and  C<escape_char> to be abbreviated as  C<esc>
@@ -3788,6 +3804,12 @@ X<1007>
 The value passed for QUOTE is exceeding its maximum length (16).
 
 =item *
+1008 "INI - SEP undefined"
+X<1008>
+
+The value passed for SEP should be defined and not empty.
+
+=item *
 1010 "INI - the header is empty"
 X<1010>
 
@@ -3812,6 +3834,18 @@ X<1013>
 
 The header line parsed in the  L</header>  contains at least  two identical
 fields.
+
+=item *
+1014 "INI - header called on undefined stream"
+X<1014>
+
+The header line cannot be parsed from an undefined sources.
+
+=item *
+1500 "PRM - Invalid/unsupported argument(s)"
+X<1500>
+
+Function or method called with invalid argument(s) or parameter(s).
 
 =item *
 2010 "ECR - QUO char inside quotes followed by CR not part of EOL"
@@ -4004,7 +4038,7 @@ L</csv> function. See ChangeLog releases 0.25 and on.
 
 =head1 COPYRIGHT AND LICENSE
 
- Copyright (C) 2007-2016 H.Merijn Brand.  All rights reserved.
+ Copyright (C) 2007-2017 H.Merijn Brand.  All rights reserved.
  Copyright (C) 1998-2001 Jochen Wiedmann. All rights reserved.
  Copyright (C) 1997      Alan Citterman.  All rights reserved.
 
