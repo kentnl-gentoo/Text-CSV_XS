@@ -66,6 +66,9 @@
      (SvROK (f) || (SvRMAGICAL (f) && (mg_get (f), 1) && SvROK (f))) && \
       SvOK (f) && SvTYPE (SvRV (f)) == SVt_PVCV )
 
+#define SvSetUndef(sv)	sv_setpvn    (sv, NULL, 0)
+#define SvSetEmpty(sv)	sv_setpvn_mg (sv, "",   0)
+
 #define CSV_XS_SELF					\
     if (!self || !SvOK (self) || !SvROK (self) ||	\
 	 SvTYPE (SvRV (self)) != SVt_PVHV)		\
@@ -721,7 +724,7 @@ static SV *cx_bound_field (pTHX_ csv_t *csv, int i, int keep) {
 		return (sv);
 
 	    unless (SvREADONLY (sv)) {
-		sv_setpvn (sv, "", 0);
+		SvSetEmpty (sv);
 		return (sv);
 		}
 	    }
@@ -1046,7 +1049,7 @@ int CSV_GET_ (pTHX_ csv_t *csv, SV *src, int l) {
     if (SvCUR (sv) == 0 && (						\
 	    csv->empty_is_undef ||					\
 	    (!(f & CSV_FLAGS_QUO) && csv->blank_is_undef)))		\
-	sv_setpvn (sv, NULL, 0);					\
+	SvSetUndef (sv);						\
     else {								\
 	if (csv->allow_whitespace && ! (f & CSV_FLAGS_QUO))		\
 	    strip_trail_whitespace (sv);				\
@@ -1137,9 +1140,9 @@ restart:
 		 * ^           ^
 		 */
 		if (csv->blank_is_undef || csv->empty_is_undef)
-		    sv_setpvn (sv, NULL, 0);
+		    SvSetUndef (sv);
 		else
-		    sv_setpvn (sv, "", 0);
+		    SvSetEmpty (sv);
 		unless (csv->is_bound)
 		    av_push (fields, sv);
 		sv = NULL;
@@ -1347,7 +1350,7 @@ restart:
 		    /* ... get and store next character */
 		    int c2 = CSV_GET;
 
-		    sv_setpvn (sv, "", 0);
+		    SvSetEmpty (sv);
 
 		    if (c2 == EOF) {
 			csv->used--;
@@ -1419,9 +1422,9 @@ EOLX:
 		 *                  ^
 		 */
 		if (csv->blank_is_undef || csv->empty_is_undef)
-		    sv_setpvn (sv, NULL, 0);
+		    SvSetUndef (sv);
 		else
-		    sv_setpvn (sv, "", 0);
+		    SvSetEmpty (sv);
 		unless (csv->is_bound)
 		    av_push (fields, sv);
 		if (csv->keep_meta_info && fflags)
@@ -1636,9 +1639,9 @@ EOLX:
 	if (seenSomething || !csv->useIO) {
 	    NewField;
 	    if (csv->blank_is_undef || csv->empty_is_undef)
-		sv_setpvn (sv, NULL, 0);
+		SvSetUndef (sv);
 	    else
-		sv_setpvn (sv, "", 0);
+		SvSetEmpty (sv);
 	    unless (csv->is_bound)
 		av_push (fields, sv);
 	    if (csv->keep_meta_info && fflags)
